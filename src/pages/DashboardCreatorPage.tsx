@@ -6202,7 +6202,7 @@ function PivotCard({
                   <th
                     key={rh}
                     ref={(el) => { if (el) thRefs.current.set(ri, el); else thRefs.current.delete(ri) }}
-                    className="text-left px-3 py-2.5 text-xs font-medium text-gray-600 border-b border-gray-200 sticky top-0 bg-gray-50/80 relative select-none overflow-hidden text-ellipsis whitespace-nowrap group/th"
+                    className="text-left px-3 py-2.5 text-xs font-medium text-gray-600 border-b border-gray-200 sticky top-0 bg-gray-100 relative select-none overflow-hidden text-ellipsis whitespace-nowrap group/th"
                   >
                     <span className="inline-flex items-center gap-1">
                       {rh}
@@ -6344,7 +6344,7 @@ function PivotCard({
                     const colFmt = widget.columnFormats?.[rh]
                     const displayVal = colFmt ? applyColumnFormat(k, colFmt) : String(k ?? '—')
                     return (
-                    <td key={ki} className="px-3 py-2 text-xs text-gray-800 border-b border-gray-100 font-medium whitespace-nowrap overflow-hidden text-ellipsis" style={cellStyle}>{displayVal}</td>
+                    <td key={ki} className="px-3 py-2 text-xs text-gray-800 border-b border-gray-100 font-medium whitespace-nowrap overflow-hidden text-ellipsis bg-gray-50/60" style={cellStyle}>{displayVal}</td>
                     )
                   })}
                   {row.values.map((v, vi) => {
