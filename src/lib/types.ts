@@ -72,7 +72,12 @@ export interface LightspeedConnection {
   connectedAt: Date
 }
 
-export interface LightspeedSaleLine {
+/**
+ * One document per item sold — fully denormalised with sale context.
+ * Stored at: users/{uid}/lightspeedSales/{saleLineID}
+ */
+export interface LightspeedSoldItem {
+  // ---- Line item details ----
   saleLineID: string
   itemID: string
   itemDescription: string
@@ -100,69 +105,46 @@ export interface LightspeedSaleLine {
   manufacturerSku: string
   upc: string
   ean: string
-  createTime: string
-  timeStamp: string
-}
+  lineCreateTime: string
+  lineTimeStamp: string
 
-export interface LightspeedSalePayment {
-  salePaymentID: string
-  amount: number
-  tipAmount: number
-  paymentTypeName: string
-  paymentTypeID: string
-  createTime: string
-}
-
-export interface LightspeedSale {
+  // ---- Parent sale details ----
   saleID: string
-  timeStamp: string
-  completed: boolean
-  archived: boolean
-  voided: boolean
-  createTime: string
-  updateTime: string
-  completeTime: string | null
+  saleCompleted: boolean
+  saleArchived: boolean
+  saleVoided: boolean
+  saleCreateTime: string
+  saleUpdateTime: string
+  saleCompleteTime: string | null
+  ticketNumber: string
   referenceNumber: string
   referenceNumberSource: string
-  ticketNumber: string
-  tax1Rate: number
-  tax2Rate: number
-  change: number
-  tipEnabled: boolean
-  receiptPreference: string
-  displayableSubtotal: number
-  calcDiscount: number
-  calcTotal: number
-  calcSubtotal: number
-  calcTaxable: number
-  calcNonTaxable: number
-  calcAvgCost: number
-  calcFIFOCost: number
-  calcTax1: number
-  calcTax2: number
-  calcPayments: number
-  calcTips: number
-  total: number
-  totalDue: number
-  displayableTotal: number
-  balance: number
-  // Denormalised customer info
+  saleTotal: number
+  saleSubtotal: number
+  saleDiscount: number
+  saleTax1: number
+  saleTax2: number
+  saleTaxTotal: number
+  salePayments: number
+  saleTips: number
+  saleBalance: number
+  saleTotalDue: number
+
+  // ---- Customer ----
   customerID: string
   customerFirstName: string
   customerLastName: string
-  // Denormalised employee info
+
+  // ---- Employee / Shop / Register ----
   employeeID: string
-  employeeFirstName: string
-  employeeLastName: string
-  // Shop / register
   registerID: string
   shopID: string
-  shopName: string
-  taxCategoryID: string
-  // Line items + payments
-  saleLines: LightspeedSaleLine[]
-  salePayments: LightspeedSalePayment[]
-  // Sync metadata
+
+  // ---- Payment summary (denormalised from SalePayments) ----
+  paymentTypes: string
+  paymentTotal: number
+
+  // ---- Sync metadata ----
   syncedAt: Date
 }
 

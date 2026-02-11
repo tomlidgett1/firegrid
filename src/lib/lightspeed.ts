@@ -1,6 +1,6 @@
-import { doc, getDoc, setDoc, collection, getDocs, query, orderBy, writeBatch, Timestamp, serverTimestamp, limit as fbLimit } from 'firebase/firestore'
+import { doc, getDoc, setDoc, collection, getDocs, query, orderBy, writeBatch, Timestamp, serverTimestamp } from 'firebase/firestore'
 import { db } from '@/lib/firebase'
-import type { LightspeedConnection, LightspeedSale, LightspeedSaleLine, LightspeedSalePayment } from '@/lib/types'
+import type { LightspeedConnection, LightspeedSoldItem } from '@/lib/types'
 
 const LIGHTSPEED_CLIENT_ID = import.meta.env.VITE_LIGHTSPEED_CLIENT_ID as string
 const LS_API_BASE = 'https://api.lightspeedapp.com/API/V3'
@@ -191,127 +191,107 @@ export async function fetchLightspeedAccount(accessToken: string): Promise<{ acc
   }
 }
 
-// ---- Parse sale data from API response ----
+// ---- Parse a single sale into flat sold-item rows ----
 
-function parseSaleFromApi(raw: Record<string, unknown>): LightspeedSale {
+function parseSaleToItems(raw: Record<string, unknown>): LightspeedSoldItem[] {
   const customer = raw.Customer as Record<string, unknown> | undefined
-  const employee = raw.Employee as Record<string, unknown> | undefined
-  const shop = raw.Shop as Record<string, unknown> | undefined
 
-  // Parse SaleLines
-  const rawLines = raw.SaleLines as Record<string, unknown> | undefined
-  let saleLines: LightspeedSaleLine[] = []
-  if (rawLines?.SaleLine) {
-    const lines = Array.isArray(rawLines.SaleLine) ? rawLines.SaleLine : [rawLines.SaleLine]
-    saleLines = lines.map((line: Record<string, unknown>) => {
-      const item = line.Item as Record<string, unknown> | undefined
-      return {
-        saleLineID: String(line.saleLineID || ''),
-        itemID: String(line.itemID || ''),
-        itemDescription: String(item?.description || line.itemDescription || ''),
-        unitQuantity: Number(line.unitQuantity || 0),
-        unitPrice: Number(line.unitPrice || 0),
-        avgCost: Number(line.avgCost || 0),
-        fifoCost: Number(line.fifoCost || 0),
-        normalPrice: Number(line.normalPrice || 0),
-        discountAmount: Number(line.discountAmount || 0),
-        discountPercent: Number(line.discountPercent || 0),
-        tax: line.tax === 'true' || line.tax === true,
-        tax1Rate: Number(line.tax1Rate || 0),
-        tax2Rate: Number(line.tax2Rate || 0),
-        calcTotal: Number(line.calcTotal || 0),
-        calcSubtotal: Number(line.calcSubtotal || 0),
-        calcTax1: Number(line.calcTax1 || 0),
-        calcTax2: Number(line.calcTax2 || 0),
-        calcLineDiscount: Number(line.calcLineDiscount || 0),
-        taxTotal: Number(line.taxTotal || 0),
-        isLayaway: line.isLayaway === 'true' || line.isLayaway === true,
-        isWorkorder: line.isWorkorder === 'true' || line.isWorkorder === true,
-        isSpecialOrder: line.isSpecialOrder === 'true' || line.isSpecialOrder === true,
-        note: String((line.Note as Record<string, unknown>)?.note || ''),
-        customSku: String(item?.customSku || ''),
-        manufacturerSku: String(item?.manufacturerSku || ''),
-        upc: String(item?.upc || ''),
-        ean: String(item?.ean || ''),
-        createTime: String(line.createTime || ''),
-        timeStamp: String(line.timeStamp || ''),
-      }
-    })
-  }
-
-  // Parse SalePayments
+  // Payment summary
   const rawPayments = raw.SalePayments as Record<string, unknown> | undefined
-  let salePayments: LightspeedSalePayment[] = []
+  let paymentTypeNames: string[] = []
+  let paymentTotal = 0
   if (rawPayments?.SalePayment) {
     const payments = Array.isArray(rawPayments.SalePayment) ? rawPayments.SalePayment : [rawPayments.SalePayment]
-    salePayments = payments.map((pay: Record<string, unknown>) => {
-      const paymentType = pay.PaymentType as Record<string, unknown> | undefined
-      return {
-        salePaymentID: String(pay.salePaymentID || ''),
-        amount: Number(pay.amount || 0),
-        tipAmount: Number(pay.tipAmount || 0),
-        paymentTypeName: String(paymentType?.name || 'Unknown'),
-        paymentTypeID: String(pay.paymentTypeID || ''),
-        createTime: String(pay.createTime || ''),
-      }
-    })
+    for (const pay of payments as Record<string, unknown>[]) {
+      const pt = pay.PaymentType as Record<string, unknown> | undefined
+      const name = String(pt?.name || 'Unknown')
+      if (!paymentTypeNames.includes(name)) paymentTypeNames.push(name)
+      paymentTotal += Number(pay.amount || 0)
+    }
   }
+  const paymentTypes = paymentTypeNames.join(', ')
 
-  return {
+  // Shared sale-level fields
+  const saleBase = {
     saleID: String(raw.saleID || ''),
-    timeStamp: String(raw.timeStamp || ''),
-    completed: raw.completed === 'true' || raw.completed === true,
-    archived: raw.archived === 'true' || raw.archived === true,
-    voided: raw.voided === 'true' || raw.voided === true,
-    createTime: String(raw.createTime || ''),
-    updateTime: String(raw.updatetime || raw.updateTime || ''),
-    completeTime: raw.completeTime ? String(raw.completeTime) : null,
+    saleCompleted: raw.completed === 'true' || raw.completed === true,
+    saleArchived: raw.archived === 'true' || raw.archived === true,
+    saleVoided: raw.voided === 'true' || raw.voided === true,
+    saleCreateTime: String(raw.createTime || ''),
+    saleUpdateTime: String(raw.updatetime || raw.updateTime || ''),
+    saleCompleteTime: raw.completeTime ? String(raw.completeTime) : null,
+    ticketNumber: String(raw.ticketNumber || ''),
     referenceNumber: String(raw.referenceNumber || ''),
     referenceNumberSource: String(raw.referenceNumberSource || ''),
-    ticketNumber: String(raw.ticketNumber || ''),
-    tax1Rate: Number(raw.tax1Rate || 0),
-    tax2Rate: Number(raw.tax2Rate || 0),
-    change: Number(raw.change || 0),
-    tipEnabled: raw.tipEnabled === 'true' || raw.tipEnabled === true,
-    receiptPreference: String(raw.receiptPreference || ''),
-    displayableSubtotal: Number(raw.displayableSubtotal || 0),
-    calcDiscount: Number(raw.calcDiscount || 0),
-    calcTotal: Number(raw.calcTotal || 0),
-    calcSubtotal: Number(raw.calcSubtotal || 0),
-    calcTaxable: Number(raw.calcTaxable || 0),
-    calcNonTaxable: Number(raw.calcNonTaxable || 0),
-    calcAvgCost: Number(raw.calcAvgCost || 0),
-    calcFIFOCost: Number(raw.calcFIFOCost || 0),
-    calcTax1: Number(raw.calcTax1 || 0),
-    calcTax2: Number(raw.calcTax2 || 0),
-    calcPayments: Number(raw.calcPayments || 0),
-    calcTips: Number(raw.calcTips || 0),
-    total: Number(raw.total || 0),
-    totalDue: Number(raw.totalDue || 0),
-    displayableTotal: Number(raw.displayableTotal || 0),
-    balance: Number(raw.balance || 0),
+    saleTotal: Number(raw.total || 0),
+    saleSubtotal: Number(raw.calcSubtotal || 0),
+    saleDiscount: Number(raw.calcDiscount || 0),
+    saleTax1: Number(raw.calcTax1 || 0),
+    saleTax2: Number(raw.calcTax2 || 0),
+    saleTaxTotal: Number(raw.calcTax1 || 0) + Number(raw.calcTax2 || 0),
+    salePayments: Number(raw.calcPayments || 0),
+    saleTips: Number(raw.calcTips || 0),
+    saleBalance: Number(raw.balance || 0),
+    saleTotalDue: Number(raw.totalDue || 0),
     customerID: String(raw.customerID || '0'),
     customerFirstName: String(customer?.firstName || ''),
     customerLastName: String(customer?.lastName || ''),
     employeeID: String(raw.employeeID || '0'),
-    employeeFirstName: String(employee?.firstName || ''),
-    employeeLastName: String(employee?.lastName || ''),
     registerID: String(raw.registerID || ''),
     shopID: String(raw.shopID || ''),
-    shopName: String(shop?.name || ''),
-    taxCategoryID: String(raw.taxCategoryID || ''),
-    saleLines,
-    salePayments,
-    syncedAt: new Date(),
+    paymentTypes,
+    paymentTotal,
   }
+
+  // Parse each SaleLine into a flat item row
+  const rawLines = raw.SaleLines as Record<string, unknown> | undefined
+  if (!rawLines?.SaleLine) return []
+
+  const lines = Array.isArray(rawLines.SaleLine) ? rawLines.SaleLine : [rawLines.SaleLine]
+  return lines.map((line: Record<string, unknown>) => {
+    const item = line.Item as Record<string, unknown> | undefined
+    return {
+      ...saleBase,
+      // Line item details
+      saleLineID: String(line.saleLineID || ''),
+      itemID: String(line.itemID || ''),
+      itemDescription: String(item?.description || ''),
+      unitQuantity: Number(line.unitQuantity || 0),
+      unitPrice: Number(line.unitPrice || 0),
+      avgCost: Number(line.avgCost || 0),
+      fifoCost: Number(line.fifoCost || 0),
+      normalPrice: Number(line.normalPrice || 0),
+      discountAmount: Number(line.discountAmount || 0),
+      discountPercent: Number(line.discountPercent || 0),
+      tax: line.tax === 'true' || line.tax === true,
+      tax1Rate: Number(line.tax1Rate || 0),
+      tax2Rate: Number(line.tax2Rate || 0),
+      calcTotal: Number(line.calcTotal || 0),
+      calcSubtotal: Number(line.calcSubtotal || 0),
+      calcTax1: Number(line.calcTax1 || 0),
+      calcTax2: Number(line.calcTax2 || 0),
+      calcLineDiscount: Number(line.calcLineDiscount || 0),
+      taxTotal: Number(line.taxTotal || 0),
+      isLayaway: line.isLayaway === 'true' || line.isLayaway === true,
+      isWorkorder: line.isWorkorder === 'true' || line.isWorkorder === true,
+      isSpecialOrder: line.isSpecialOrder === 'true' || line.isSpecialOrder === true,
+      note: String((line.Note as Record<string, unknown>)?.note || ''),
+      customSku: String(item?.customSku || ''),
+      manufacturerSku: String(item?.manufacturerSku || ''),
+      upc: String(item?.upc || ''),
+      ean: String(item?.ean || ''),
+      lineCreateTime: String(line.createTime || ''),
+      lineTimeStamp: String(line.timeStamp || ''),
+      syncedAt: new Date(),
+    } as LightspeedSoldItem
+  })
 }
 
 // ---- Sync sales from Lightspeed to Firestore ----
 
 /**
- * Fetches sales from Lightspeed and stores them in Firestore.
- * Uses lastSalesSync to only fetch updated sales (incremental sync).
- * Returns the number of sales synced.
+ * Fetches sales from Lightspeed and stores one document per item sold.
+ * Uses lastSalesSync for incremental sync.
  */
 export async function syncSales(
   uid: string,
@@ -323,9 +303,9 @@ export async function syncSales(
   const conn = await getLightspeedConnection(uid)
   const lastSync = conn?.lastSalesSync
 
-  let totalSynced = 0
-  const BATCH_LIMIT = 1000 // Fetch 1000, store, then continue
-  let buffer: LightspeedSale[] = []
+  let totalItems = 0
+  const FLUSH_LIMIT = 1000
+  let buffer: LightspeedSoldItem[] = []
 
   // Build initial URL with relations
   let nextUrl: string | null =
@@ -349,25 +329,27 @@ export async function syncSales(
       const attrs = responseData['@attributes'] as Record<string, unknown> | undefined
       const rawSales = responseData.Sale
 
-      if (!rawSales) {
-        break
-      }
+      if (!rawSales) break
 
       const salesArray = Array.isArray(rawSales) ? rawSales : [rawSales]
-      const parsed = salesArray.map((s) => parseSaleFromApi(s as Record<string, unknown>))
-      buffer = buffer.concat(parsed)
 
-      onProgress?.(`Fetched ${totalSynced + buffer.length} sales...`)
-
-      // Once we hit the batch limit, flush to Firestore
-      if (buffer.length >= BATCH_LIMIT) {
-        await flushSalesToFirestore(uid, buffer, onProgress, totalSynced)
-        totalSynced += buffer.length
-        buffer = []
-        onProgress?.(`Stored ${totalSynced} sales so far, fetching more...`)
+      // Flatten each sale into individual item rows
+      for (const rawSale of salesArray) {
+        const items = parseSaleToItems(rawSale as Record<string, unknown>)
+        buffer = buffer.concat(items)
       }
 
-      // Use cursor-based pagination — follow the "next" URL from @attributes
+      onProgress?.(`Fetched ${totalItems + buffer.length} items...`)
+
+      // Flush when buffer hits limit
+      if (buffer.length >= FLUSH_LIMIT) {
+        await flushItemsToFirestore(uid, buffer, onProgress, totalItems)
+        totalItems += buffer.length
+        buffer = []
+        onProgress?.(`Stored ${totalItems} items so far, fetching more...`)
+      }
+
+      // Cursor-based pagination
       const nextAttr = attrs?.next as string | undefined
       if (nextAttr && nextAttr.length > 0) {
         nextUrl = nextAttr.startsWith('http')
@@ -377,7 +359,6 @@ export async function syncSales(
         nextUrl = null
       }
 
-      // Rate limit safety — small delay between pages
       if (nextUrl) {
         await new Promise((r) => setTimeout(r, 500))
       }
@@ -390,60 +371,56 @@ export async function syncSales(
     }
   }
 
-  // Flush any remaining sales in the buffer
+  // Flush remaining
   if (buffer.length > 0) {
-    await flushSalesToFirestore(uid, buffer, onProgress, totalSynced)
-    totalSynced += buffer.length
+    await flushItemsToFirestore(uid, buffer, onProgress, totalItems)
+    totalItems += buffer.length
   }
 
-  // Update last sync timestamp
   await updateLastSalesSync(uid)
+  onProgress?.(`Sync complete! ${totalItems} items stored.`)
 
-  onProgress?.(`Sync complete! ${totalSynced} sales stored.`)
-
-  return { synced: totalSynced, total: totalSynced }
+  return { synced: totalItems, total: totalItems }
 }
 
-// ---- Flush a batch of sales to Firestore ----
+// ---- Flush item rows to Firestore ----
 
-async function flushSalesToFirestore(
+async function flushItemsToFirestore(
   uid: string,
-  sales: LightspeedSale[],
+  items: LightspeedSoldItem[],
   onProgress?: (message: string) => void,
   offsetCount = 0
 ): Promise<void> {
-  if (!db || sales.length === 0) return
+  if (!db || items.length === 0) return
 
-  onProgress?.(`Saving ${sales.length} sales to Firestore...`)
+  onProgress?.(`Saving ${items.length} items to Firestore...`)
 
-  // Firestore batch writes are limited to 500 operations
-  const batchSize = 250
-  for (let i = 0; i < sales.length; i += batchSize) {
+  const batchSize = 400
+  for (let i = 0; i < items.length; i += batchSize) {
     const batch = writeBatch(db)
-    const chunk = sales.slice(i, i + batchSize)
+    const chunk = items.slice(i, i + batchSize)
 
-    for (const sale of chunk) {
-      const saleRef = doc(db, 'users', uid, 'lightspeedSales', sale.saleID)
-      batch.set(saleRef, {
-        ...sale,
+    for (const item of chunk) {
+      // Document ID = saleLineID (unique per item sold)
+      const itemRef = doc(db, 'users', uid, 'lightspeedSales', item.saleLineID)
+      batch.set(itemRef, {
+        ...item,
         syncedAt: serverTimestamp(),
-        saleLines: sale.saleLines.map((l) => ({ ...l })),
-        salePayments: sale.salePayments.map((p) => ({ ...p })),
       })
     }
 
     await batch.commit()
-    onProgress?.(`Stored ${offsetCount + Math.min(i + batchSize, sales.length)} sales...`)
+    onProgress?.(`Stored ${offsetCount + Math.min(i + batchSize, items.length)} items...`)
   }
 }
 
-// ---- Load sales from Firestore ----
+// ---- Load sold items from Firestore ----
 
-export async function loadSalesFromFirestore(uid: string): Promise<LightspeedSale[]> {
+export async function loadSoldItemsFromFirestore(uid: string): Promise<LightspeedSoldItem[]> {
   if (!db) return []
 
-  const salesRef = collection(db, 'users', uid, 'lightspeedSales')
-  const q = query(salesRef, orderBy('completeTime', 'desc'))
+  const ref = collection(db, 'users', uid, 'lightspeedSales')
+  const q = query(ref, orderBy('saleCompleteTime', 'desc'))
   const snap = await getDocs(q)
 
   return snap.docs.map((d) => {
@@ -451,7 +428,7 @@ export async function loadSalesFromFirestore(uid: string): Promise<LightspeedSal
     return {
       ...data,
       syncedAt: data.syncedAt?.toDate?.() ?? new Date(),
-    } as LightspeedSale
+    } as LightspeedSoldItem
   })
 }
 

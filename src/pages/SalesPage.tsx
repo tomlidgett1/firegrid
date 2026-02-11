@@ -1,8 +1,8 @@
 import { useEffect, useState, useMemo, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
-import { syncSales, loadSalesFromFirestore, getLightspeedConnection } from '@/lib/lightspeed'
-import type { LightspeedSale, LightspeedConnection } from '@/lib/types'
+import { syncSales, loadSoldItemsFromFirestore, getLightspeedConnection } from '@/lib/lightspeed'
+import type { LightspeedSoldItem, LightspeedConnection } from '@/lib/types'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   ArrowLeft,
@@ -14,19 +14,16 @@ import {
   DollarSign,
   Receipt,
   Package,
-  CreditCard,
-  User,
   Calendar,
-  Clock,
   Hash,
   X,
   AlertCircle,
   CheckCircle,
-  Filter,
+  User,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
-type SortField = 'completeTime' | 'total' | 'ticketNumber' | 'customerLastName'
+type SortField = 'saleCompleteTime' | 'calcTotal' | 'itemDescription' | 'unitQuantity' | 'saleID' | 'customerLastName'
 type SortDir = 'asc' | 'desc'
 type StatusFilter = 'all' | 'completed' | 'voided' | 'open'
 
@@ -35,7 +32,7 @@ export default function SalesPage() {
   const navigate = useNavigate()
 
   const [connection, setConnection] = useState<LightspeedConnection | null>(null)
-  const [sales, setSales] = useState<LightspeedSale[]>([])
+  const [items, setItems] = useState<LightspeedSoldItem[]>([])
   const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
   const [syncMessage, setSyncMessage] = useState('')
@@ -43,14 +40,13 @@ export default function SalesPage() {
 
   // Table state
   const [searchQuery, setSearchQuery] = useState('')
-  const [expandedSaleId, setExpandedSaleId] = useState<string | null>(null)
-  const [sortField, setSortField] = useState<SortField>('completeTime')
+  const [sortField, setSortField] = useState<SortField>('saleCompleteTime')
   const [sortDir, setSortDir] = useState<SortDir>('desc')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
   const [currentPage, setCurrentPage] = useState(1)
-  const pageSize = 25
+  const pageSize = 50
 
-  // Load connection and sales on mount
+  // Load connection and items on mount
   useEffect(() => {
     if (!user?.uid) return
 
@@ -60,11 +56,11 @@ export default function SalesPage() {
         const conn = await getLightspeedConnection(user!.uid)
         setConnection(conn)
         if (conn) {
-          const loadedSales = await loadSalesFromFirestore(user!.uid)
-          setSales(loadedSales)
+          const loaded = await loadSoldItemsFromFirestore(user!.uid)
+          setItems(loaded)
         }
       } catch (err) {
-        console.error('Failed to load sales:', err)
+        console.error('Failed to load items:', err)
         setError('Failed to load sales data')
       } finally {
         setLoading(false)
@@ -83,13 +79,11 @@ export default function SalesPage() {
 
     try {
       const result = await syncSales(user.uid, (msg) => setSyncMessage(msg))
-      // Reload sales from Firestore
-      const loadedSales = await loadSalesFromFirestore(user.uid)
-      setSales(loadedSales)
-      // Refresh connection info (lastSalesSync)
+      const loaded = await loadSoldItemsFromFirestore(user.uid)
+      setItems(loaded)
       const conn = await getLightspeedConnection(user.uid)
       setConnection(conn)
-      setSyncMessage(`Synced ${result.synced} sales successfully!`)
+      setSyncMessage(`Synced ${result.synced} items successfully!`)
       setTimeout(() => setSyncMessage(''), 5000)
     } catch (err) {
       console.error('Sync failed:', err)
@@ -100,29 +94,32 @@ export default function SalesPage() {
   }, [user?.uid, syncing])
 
   // Filter + search + sort
-  const filteredSales = useMemo(() => {
-    let result = [...sales]
+  const filteredItems = useMemo(() => {
+    let result = [...items]
 
     // Status filter
     if (statusFilter === 'completed') {
-      result = result.filter((s) => s.completed && !s.voided)
+      result = result.filter((i) => i.saleCompleted && !i.saleVoided)
     } else if (statusFilter === 'voided') {
-      result = result.filter((s) => s.voided)
+      result = result.filter((i) => i.saleVoided)
     } else if (statusFilter === 'open') {
-      result = result.filter((s) => !s.completed && !s.voided)
+      result = result.filter((i) => !i.saleCompleted && !i.saleVoided)
     }
 
     // Search
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase()
       result = result.filter(
-        (s) =>
-          s.ticketNumber.toLowerCase().includes(q) ||
-          s.saleID.includes(q) ||
-          `${s.customerFirstName} ${s.customerLastName}`.toLowerCase().includes(q) ||
-          `${s.employeeFirstName} ${s.employeeLastName}`.toLowerCase().includes(q) ||
-          s.referenceNumber.toLowerCase().includes(q) ||
-          s.saleLines.some((l) => l.itemDescription.toLowerCase().includes(q))
+        (i) =>
+          i.itemDescription.toLowerCase().includes(q) ||
+          i.saleID.includes(q) ||
+          i.ticketNumber.toLowerCase().includes(q) ||
+          `${i.customerFirstName} ${i.customerLastName}`.toLowerCase().includes(q) ||
+          i.customSku.toLowerCase().includes(q) ||
+          i.upc.toLowerCase().includes(q) ||
+          i.ean.toLowerCase().includes(q) ||
+          i.referenceNumber.toLowerCase().includes(q) ||
+          i.paymentTypes.toLowerCase().includes(q)
       )
     }
 
@@ -130,17 +127,23 @@ export default function SalesPage() {
     result.sort((a, b) => {
       let cmp = 0
       switch (sortField) {
-        case 'completeTime': {
-          const dateA = a.completeTime || a.createTime || ''
-          const dateB = b.completeTime || b.createTime || ''
+        case 'saleCompleteTime': {
+          const dateA = a.saleCompleteTime || a.saleCreateTime || ''
+          const dateB = b.saleCompleteTime || b.saleCreateTime || ''
           cmp = dateA.localeCompare(dateB)
           break
         }
-        case 'total':
-          cmp = a.total - b.total
+        case 'calcTotal':
+          cmp = a.calcTotal - b.calcTotal
           break
-        case 'ticketNumber':
-          cmp = a.ticketNumber.localeCompare(b.ticketNumber)
+        case 'itemDescription':
+          cmp = a.itemDescription.localeCompare(b.itemDescription)
+          break
+        case 'unitQuantity':
+          cmp = a.unitQuantity - b.unitQuantity
+          break
+        case 'saleID':
+          cmp = a.saleID.localeCompare(b.saleID)
           break
         case 'customerLastName':
           cmp = `${a.customerLastName} ${a.customerFirstName}`.localeCompare(
@@ -152,11 +155,11 @@ export default function SalesPage() {
     })
 
     return result
-  }, [sales, searchQuery, sortField, sortDir, statusFilter])
+  }, [items, searchQuery, sortField, sortDir, statusFilter])
 
   // Pagination
-  const totalPages = Math.max(1, Math.ceil(filteredSales.length / pageSize))
-  const paginatedSales = filteredSales.slice((currentPage - 1) * pageSize, currentPage * pageSize)
+  const totalPages = Math.max(1, Math.ceil(filteredItems.length / pageSize))
+  const paginatedItems = filteredItems.slice((currentPage - 1) * pageSize, currentPage * pageSize)
 
   // Reset page on filter change
   useEffect(() => {
@@ -189,43 +192,25 @@ export default function SalesPage() {
     }
   }
 
-  const formatDateTime = (dateStr: string | null) => {
-    if (!dateStr) return '—'
-    try {
-      return new Date(dateStr).toLocaleString('en-AU', {
-        day: '2-digit',
-        month: 'short',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-      })
-    } catch {
-      return dateStr
-    }
-  }
-
-  const getSaleStatus = (sale: LightspeedSale) => {
-    if (sale.voided) return { label: 'Voided', className: 'text-red-600 bg-red-50 dark:text-red-400 dark:bg-red-900/20' }
-    if (sale.completed) return { label: 'Completed', className: 'text-green-600 bg-green-50 dark:text-green-400 dark:bg-green-900/20' }
+  const getItemStatus = (item: LightspeedSoldItem) => {
+    if (item.saleVoided) return { label: 'Voided', className: 'text-red-600 bg-red-50 dark:text-red-400 dark:bg-red-900/20' }
+    if (item.saleCompleted) return { label: 'Completed', className: 'text-green-600 bg-green-50 dark:text-green-400 dark:bg-green-900/20' }
     return { label: 'Open', className: 'text-amber-600 bg-amber-50 dark:text-amber-400 dark:bg-amber-900/20' }
   }
 
   // Summary stats
   const stats = useMemo(() => {
-    const completedSales = sales.filter((s) => s.completed && !s.voided)
-    const totalRevenue = completedSales.reduce((sum, s) => sum + s.total, 0)
-    const totalItems = completedSales.reduce(
-      (sum, s) => sum + s.saleLines.reduce((ls, l) => ls + Math.abs(l.unitQuantity), 0),
-      0
-    )
-    const avgSale = completedSales.length > 0 ? totalRevenue / completedSales.length : 0
+    const completedItems = items.filter((i) => i.saleCompleted && !i.saleVoided)
+    const totalRevenue = completedItems.reduce((sum, i) => sum + i.calcTotal, 0)
+    const totalQty = completedItems.reduce((sum, i) => sum + Math.abs(i.unitQuantity), 0)
+    const uniqueSales = new Set(completedItems.map((i) => i.saleID))
     return {
-      totalSales: completedSales.length,
+      totalSales: uniqueSales.size,
+      totalItems: completedItems.length,
+      totalQty,
       totalRevenue,
-      totalItems,
-      avgSale,
     }
-  }, [sales])
+  }, [items])
 
   if (loading) {
     return (
@@ -238,7 +223,7 @@ export default function SalesPage() {
   if (!connection) {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center p-6">
-        <div className="bg-white dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-700 p-8 max-w-sm text-center">
+        <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-8 max-w-sm text-center">
           <AlertCircle size={24} className="text-gray-400 mx-auto mb-4" />
           <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-1">
             Lightspeed Not Connected
@@ -262,7 +247,7 @@ export default function SalesPage() {
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
       {/* Header */}
       <header className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
-        <div className="max-w-7xl mx-auto px-6 h-14 flex items-center justify-between">
+        <div className="max-w-[1400px] mx-auto px-6 h-14 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <button
               onClick={() => navigate('/dashboard')}
@@ -275,7 +260,7 @@ export default function SalesPage() {
             <div className="flex items-center gap-1.5">
               <ShoppingCart size={14} className="text-gray-400" />
               <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                Lightspeed Sales
+                Items Sold
               </span>
             </div>
           </div>
@@ -305,7 +290,7 @@ export default function SalesPage() {
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-6 py-6">
+      <main className="max-w-[1400px] mx-auto px-6 py-6">
         {/* Sync progress message */}
         <AnimatePresence>
           {syncMessage && (
@@ -313,7 +298,7 @@ export default function SalesPage() {
               initial={{ opacity: 0, y: -8 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -8 }}
-              className="mb-4 bg-white dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-700 px-4 py-3 flex items-center gap-2"
+              className="mb-4 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 px-4 py-3 flex items-center gap-2"
             >
               {syncing ? (
                 <Loader2 size={14} className="animate-spin text-gray-400" />
@@ -327,7 +312,7 @@ export default function SalesPage() {
 
         {/* Error */}
         {error && (
-          <div className="mb-4 bg-white dark:bg-gray-800 rounded-md border border-red-200 dark:border-red-800 px-4 py-3 flex items-center gap-2">
+          <div className="mb-4 bg-white dark:bg-gray-800 rounded-xl border border-red-200 dark:border-red-800 px-4 py-3 flex items-center gap-2">
             <AlertCircle size={14} className="text-red-500" />
             <span className="text-sm text-red-600 dark:text-red-400">{error}</span>
             <button onClick={() => setError('')} className="ml-auto text-gray-400 hover:text-gray-600">
@@ -338,25 +323,16 @@ export default function SalesPage() {
 
         {/* Summary Cards */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
-          <div className="bg-white dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-700 p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
             <div className="flex items-center gap-2 mb-1">
               <Receipt size={14} className="text-gray-400" />
-              <span className="text-xs text-gray-500 dark:text-gray-400">Total Sales</span>
+              <span className="text-xs text-gray-500 dark:text-gray-400">Unique Sales</span>
             </div>
             <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">
               {stats.totalSales.toLocaleString()}
             </p>
           </div>
-          <div className="bg-white dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-700 p-4">
-            <div className="flex items-center gap-2 mb-1">
-              <DollarSign size={14} className="text-gray-400" />
-              <span className="text-xs text-gray-500 dark:text-gray-400">Total Revenue</span>
-            </div>
-            <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-              {formatCurrency(stats.totalRevenue)}
-            </p>
-          </div>
-          <div className="bg-white dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-700 p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
             <div className="flex items-center gap-2 mb-1">
               <Package size={14} className="text-gray-400" />
               <span className="text-xs text-gray-500 dark:text-gray-400">Items Sold</span>
@@ -365,13 +341,22 @@ export default function SalesPage() {
               {stats.totalItems.toLocaleString()}
             </p>
           </div>
-          <div className="bg-white dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-700 p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
             <div className="flex items-center gap-2 mb-1">
               <ShoppingCart size={14} className="text-gray-400" />
-              <span className="text-xs text-gray-500 dark:text-gray-400">Avg. Sale</span>
+              <span className="text-xs text-gray-500 dark:text-gray-400">Total Qty</span>
             </div>
             <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-              {formatCurrency(stats.avgSale)}
+              {stats.totalQty.toLocaleString()}
+            </p>
+          </div>
+          <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+            <div className="flex items-center gap-2 mb-1">
+              <DollarSign size={14} className="text-gray-400" />
+              <span className="text-xs text-gray-500 dark:text-gray-400">Total Revenue</span>
+            </div>
+            <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+              {formatCurrency(stats.totalRevenue)}
             </p>
           </div>
         </div>
@@ -383,7 +368,7 @@ export default function SalesPage() {
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
             <input
               type="text"
-              placeholder="Search sales, customers, items..."
+              placeholder="Search items, sales, customers, SKUs..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full text-sm border border-gray-200 dark:border-gray-600 rounded-md pl-9 pr-3 py-2 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-200 dark:focus:ring-gray-600"
@@ -418,12 +403,12 @@ export default function SalesPage() {
 
           {/* Result count */}
           <span className="text-xs text-gray-400 dark:text-gray-500 ml-auto">
-            {filteredSales.length} {filteredSales.length === 1 ? 'sale' : 'sales'}
+            {filteredItems.length} {filteredItems.length === 1 ? 'item' : 'items'}
           </span>
         </div>
 
-        {/* Sales Table */}
-        {sales.length === 0 ? (
+        {/* Items Table */}
+        {items.length === 0 ? (
           <div className="bg-white dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-700 p-12 text-center">
             <ShoppingCart size={24} className="text-gray-300 dark:text-gray-600 mx-auto mb-3" />
             <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">No sales data yet</p>
@@ -445,22 +430,60 @@ export default function SalesPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-gray-100 dark:border-gray-700 bg-gray-50/60 dark:bg-gray-700/60">
-                    <th className="w-8" />
                     <SortableHeader
                       label="Date"
-                      field="completeTime"
+                      field="saleCompleteTime"
                       currentField={sortField}
                       currentDir={sortDir}
                       onSort={handleSort}
                       icon={<Calendar size={11} />}
                     />
                     <SortableHeader
-                      label="Ticket #"
-                      field="ticketNumber"
+                      label="Sale #"
+                      field="saleID"
                       currentField={sortField}
                       currentDir={sortDir}
                       onSort={handleSort}
                       icon={<Hash size={11} />}
+                    />
+                    <th className="text-left px-3 py-2.5 text-xs font-medium text-gray-500 dark:text-gray-400">
+                      Ticket
+                    </th>
+                    <SortableHeader
+                      label="Item"
+                      field="itemDescription"
+                      currentField={sortField}
+                      currentDir={sortDir}
+                      onSort={handleSort}
+                      icon={<Package size={11} />}
+                    />
+                    <th className="text-left px-3 py-2.5 text-xs font-medium text-gray-500 dark:text-gray-400">
+                      SKU / UPC
+                    </th>
+                    <SortableHeader
+                      label="Qty"
+                      field="unitQuantity"
+                      currentField={sortField}
+                      currentDir={sortDir}
+                      onSort={handleSort}
+                    />
+                    <th className="text-right px-3 py-2.5 text-xs font-medium text-gray-500 dark:text-gray-400">
+                      Unit Price
+                    </th>
+                    <th className="text-right px-3 py-2.5 text-xs font-medium text-gray-500 dark:text-gray-400">
+                      Discount
+                    </th>
+                    <th className="text-right px-3 py-2.5 text-xs font-medium text-gray-500 dark:text-gray-400">
+                      Tax
+                    </th>
+                    <SortableHeader
+                      label="Line Total"
+                      field="calcTotal"
+                      currentField={sortField}
+                      currentDir={sortDir}
+                      onSort={handleSort}
+                      icon={<DollarSign size={11} />}
+                      align="right"
                     />
                     <SortableHeader
                       label="Customer"
@@ -470,62 +493,102 @@ export default function SalesPage() {
                       onSort={handleSort}
                       icon={<User size={11} />}
                     />
-                    <th className="text-left px-4 py-2.5 text-xs font-medium text-gray-500 dark:text-gray-400">
-                      Employee
-                    </th>
-                    <th className="text-left px-4 py-2.5 text-xs font-medium text-gray-500 dark:text-gray-400">
-                      Items
-                    </th>
-                    <th className="text-left px-4 py-2.5 text-xs font-medium text-gray-500 dark:text-gray-400">
-                      Subtotal
-                    </th>
-                    <th className="text-left px-4 py-2.5 text-xs font-medium text-gray-500 dark:text-gray-400">
-                      Discount
-                    </th>
-                    <th className="text-left px-4 py-2.5 text-xs font-medium text-gray-500 dark:text-gray-400">
-                      Tax
-                    </th>
-                    <SortableHeader
-                      label="Total"
-                      field="total"
-                      currentField={sortField}
-                      currentDir={sortDir}
-                      onSort={handleSort}
-                      icon={<DollarSign size={11} />}
-                    />
-                    <th className="text-left px-4 py-2.5 text-xs font-medium text-gray-500 dark:text-gray-400">
+                    <th className="text-left px-3 py-2.5 text-xs font-medium text-gray-500 dark:text-gray-400">
                       Payment
                     </th>
-                    <th className="text-left px-4 py-2.5 text-xs font-medium text-gray-500 dark:text-gray-400">
+                    <th className="text-left px-3 py-2.5 text-xs font-medium text-gray-500 dark:text-gray-400">
                       Status
                     </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
-                  {paginatedSales.map((sale) => {
-                    const isExpanded = expandedSaleId === sale.saleID
-                    const status = getSaleStatus(sale)
-                    const itemCount = sale.saleLines.reduce(
-                      (sum, l) => sum + Math.abs(l.unitQuantity),
-                      0
-                    )
-                    const paymentNames = [...new Set(sale.salePayments.map((p) => p.paymentTypeName))].join(', ')
-
+                  {paginatedItems.map((item) => {
+                    const status = getItemStatus(item)
                     return (
-                      <SaleRow
-                        key={sale.saleID}
-                        sale={sale}
-                        isExpanded={isExpanded}
-                        status={status}
-                        itemCount={itemCount}
-                        paymentNames={paymentNames}
-                        formatCurrency={formatCurrency}
-                        formatDate={formatDate}
-                        formatDateTime={formatDateTime}
-                        onToggle={() =>
-                          setExpandedSaleId(isExpanded ? null : sale.saleID)
-                        }
-                      />
+                      <tr
+                        key={item.saleLineID}
+                        className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+                      >
+                        <td className="px-3 py-2.5">
+                          <span className="text-xs text-gray-700 dark:text-gray-300">
+                            {formatDate(item.saleCompleteTime || item.saleCreateTime)}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2.5">
+                          <span className="text-xs font-mono text-gray-500 dark:text-gray-400">
+                            {item.saleID}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2.5">
+                          <span className="text-xs font-mono text-gray-500 dark:text-gray-400">
+                            {item.ticketNumber || '—'}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2.5 max-w-[220px]">
+                          <span className="text-xs text-gray-800 dark:text-gray-200 truncate block">
+                            {item.itemDescription || `Item #${item.itemID}`}
+                          </span>
+                          {item.note && (
+                            <p className="text-[10px] text-gray-400 mt-0.5 italic truncate">
+                              {item.note}
+                            </p>
+                          )}
+                        </td>
+                        <td className="px-3 py-2.5">
+                          <span className="text-xs font-mono text-gray-500 dark:text-gray-400">
+                            {item.customSku || item.upc || item.ean || '—'}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2.5 text-right">
+                          <span className="text-xs text-gray-600 dark:text-gray-400">
+                            {item.unitQuantity}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2.5 text-right">
+                          <span className="text-xs text-gray-600 dark:text-gray-400">
+                            {formatCurrency(item.unitPrice)}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2.5 text-right">
+                          <span className="text-xs text-gray-500 dark:text-gray-400">
+                            {item.calcLineDiscount > 0
+                              ? `-${formatCurrency(item.calcLineDiscount)}`
+                              : '—'}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2.5 text-right">
+                          <span className="text-xs text-gray-500 dark:text-gray-400">
+                            {formatCurrency(item.calcTax1 + item.calcTax2)}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2.5 text-right">
+                          <span className="text-xs font-medium text-gray-900 dark:text-gray-100">
+                            {formatCurrency(item.calcTotal)}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2.5">
+                          <span className="text-xs text-gray-700 dark:text-gray-300 truncate max-w-[120px] block">
+                            {item.customerFirstName || item.customerLastName
+                              ? `${item.customerFirstName} ${item.customerLastName}`.trim()
+                              : '—'}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2.5">
+                          <span className="text-xs text-gray-500 dark:text-gray-400 truncate max-w-[100px] block">
+                            {item.paymentTypes || '—'}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2.5">
+                          <span
+                            className={cn(
+                              'inline-flex px-1.5 py-0.5 rounded-md text-[10px] font-medium',
+                              status.className
+                            )}
+                          >
+                            {status.label}
+                          </span>
+                        </td>
+                      </tr>
                     )
                   })}
                 </tbody>
@@ -536,7 +599,7 @@ export default function SalesPage() {
             {totalPages > 1 && (
               <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100 dark:border-gray-700">
                 <span className="text-xs text-gray-400 dark:text-gray-500">
-                  Page {currentPage} of {totalPages}
+                  Page {currentPage} of {totalPages} · {filteredItems.length} items
                 </span>
                 <div className="flex items-center gap-1">
                   <button
@@ -572,20 +635,25 @@ function SortableHeader({
   currentDir,
   onSort,
   icon,
+  align = 'left',
 }: {
   label: string
   field: SortField
   currentField: SortField
   currentDir: SortDir
   onSort: (field: SortField) => void
-  icon: React.ReactNode
+  icon?: React.ReactNode
+  align?: 'left' | 'right'
 }) {
   const isActive = currentField === field
   return (
-    <th className="text-left px-4 py-2.5">
+    <th className={cn('px-3 py-2.5', align === 'right' ? 'text-right' : 'text-left')}>
       <button
         onClick={() => onSort(field)}
-        className="flex items-center gap-1 text-xs font-medium text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
+        className={cn(
+          'flex items-center gap-1 text-xs font-medium text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors',
+          align === 'right' && 'ml-auto'
+        )}
       >
         {icon}
         {label}
@@ -597,357 +665,5 @@ function SortableHeader({
         )}
       </button>
     </th>
-  )
-}
-
-// ---- Sale Row with Expandable Detail ----
-
-function SaleRow({
-  sale,
-  isExpanded,
-  status,
-  itemCount,
-  paymentNames,
-  formatCurrency,
-  formatDate,
-  formatDateTime,
-  onToggle,
-}: {
-  sale: LightspeedSale
-  isExpanded: boolean
-  status: { label: string; className: string }
-  itemCount: number
-  paymentNames: string
-  formatCurrency: (val: number) => string
-  formatDate: (dateStr: string | null) => string
-  formatDateTime: (dateStr: string | null) => string
-  onToggle: () => void
-}) {
-  return (
-    <>
-      <tr
-        className="group hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors cursor-pointer"
-        onClick={onToggle}
-      >
-        <td className="pl-3 py-3">
-          <ChevronDown
-            size={14}
-            className={cn(
-              'text-gray-400 transition-transform duration-200',
-              isExpanded && 'rotate-180'
-            )}
-          />
-        </td>
-        <td className="px-4 py-3">
-          <span className="text-xs text-gray-700 dark:text-gray-300">
-            {formatDate(sale.completeTime || sale.createTime)}
-          </span>
-        </td>
-        <td className="px-4 py-3">
-          <span className="text-xs font-mono text-gray-600 dark:text-gray-400">
-            {sale.ticketNumber || sale.saleID}
-          </span>
-        </td>
-        <td className="px-4 py-3">
-          <span className="text-xs text-gray-700 dark:text-gray-300">
-            {sale.customerFirstName || sale.customerLastName
-              ? `${sale.customerFirstName} ${sale.customerLastName}`.trim()
-              : '—'}
-          </span>
-        </td>
-        <td className="px-4 py-3">
-          <span className="text-xs text-gray-500 dark:text-gray-400">
-            {sale.employeeFirstName || sale.employeeLastName
-              ? `${sale.employeeFirstName} ${sale.employeeLastName}`.trim()
-              : '—'}
-          </span>
-        </td>
-        <td className="px-4 py-3">
-          <span className="text-xs text-gray-500 dark:text-gray-400">
-            {itemCount} {itemCount === 1 ? 'item' : 'items'}
-          </span>
-        </td>
-        <td className="px-4 py-3">
-          <span className="text-xs text-gray-600 dark:text-gray-400">
-            {formatCurrency(sale.calcSubtotal)}
-          </span>
-        </td>
-        <td className="px-4 py-3">
-          <span className="text-xs text-gray-500 dark:text-gray-400">
-            {sale.calcDiscount > 0 ? `-${formatCurrency(sale.calcDiscount)}` : '—'}
-          </span>
-        </td>
-        <td className="px-4 py-3">
-          <span className="text-xs text-gray-500 dark:text-gray-400">
-            {formatCurrency(sale.calcTax1 + sale.calcTax2)}
-          </span>
-        </td>
-        <td className="px-4 py-3">
-          <span className="text-xs font-medium text-gray-900 dark:text-gray-100">
-            {formatCurrency(sale.total)}
-          </span>
-        </td>
-        <td className="px-4 py-3">
-          <span className="text-xs text-gray-500 dark:text-gray-400 truncate max-w-[120px] block">
-            {paymentNames || '—'}
-          </span>
-        </td>
-        <td className="px-4 py-3">
-          <span
-            className={cn(
-              'inline-flex px-1.5 py-0.5 rounded-md text-[10px] font-medium',
-              status.className
-            )}
-          >
-            {status.label}
-          </span>
-        </td>
-      </tr>
-
-      {/* Expanded detail */}
-      <AnimatePresence>
-        {isExpanded && (
-          <tr>
-            <td colSpan={12} className="p-0">
-              <motion.div
-                initial={{ height: 0, opacity: 0 }}
-                animate={{ height: 'auto', opacity: 1 }}
-                exit={{ height: 0, opacity: 0 }}
-                transition={{ duration: 0.4, ease: [0.04, 0.62, 0.23, 0.98] }}
-                className="overflow-hidden"
-              >
-                <div className="px-6 py-4 bg-gray-50/50 dark:bg-gray-800/50 border-b border-gray-100 dark:border-gray-700">
-                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
-                    {/* Sale metadata */}
-                    <div>
-                      <p className="text-[10px] uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-1">
-                        Sale ID
-                      </p>
-                      <p className="text-xs font-mono text-gray-700 dark:text-gray-300">
-                        {sale.saleID}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-[10px] uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-1">
-                        Created
-                      </p>
-                      <p className="text-xs text-gray-700 dark:text-gray-300">
-                        {formatDateTime(sale.createTime)}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-[10px] uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-1">
-                        Completed
-                      </p>
-                      <p className="text-xs text-gray-700 dark:text-gray-300">
-                        {formatDateTime(sale.completeTime)}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-[10px] uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-1">
-                        Shop
-                      </p>
-                      <p className="text-xs text-gray-700 dark:text-gray-300">
-                        {sale.shopName || `Shop #${sale.shopID}`}
-                      </p>
-                    </div>
-                    {sale.referenceNumber && (
-                      <div>
-                        <p className="text-[10px] uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-1">
-                          Reference
-                        </p>
-                        <p className="text-xs text-gray-700 dark:text-gray-300">
-                          {sale.referenceNumber}
-                          {sale.referenceNumberSource && (
-                            <span className="text-gray-400 ml-1">({sale.referenceNumberSource})</span>
-                          )}
-                        </p>
-                      </div>
-                    )}
-                    {sale.calcTips > 0 && (
-                      <div>
-                        <p className="text-[10px] uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-1">
-                          Tips
-                        </p>
-                        <p className="text-xs text-gray-700 dark:text-gray-300">
-                          {formatCurrency(sale.calcTips)}
-                        </p>
-                      </div>
-                    )}
-                    {sale.change > 0 && (
-                      <div>
-                        <p className="text-[10px] uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-1">
-                          Change Given
-                        </p>
-                        <p className="text-xs text-gray-700 dark:text-gray-300">
-                          {formatCurrency(sale.change)}
-                        </p>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Sale Lines */}
-                  {sale.saleLines.length > 0 && (
-                    <div className="mb-4">
-                      <p className="text-[10px] uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-2 flex items-center gap-1">
-                        <Package size={10} />
-                        Line Items ({sale.saleLines.length})
-                      </p>
-                      <div className="bg-white dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-700 overflow-hidden">
-                        <table className="w-full text-xs">
-                          <thead>
-                            <tr className="bg-gray-50/60 dark:bg-gray-700/60 border-b border-gray-100 dark:border-gray-700">
-                              <th className="text-left px-3 py-2 text-[10px] font-medium text-gray-500 dark:text-gray-400">
-                                Item
-                              </th>
-                              <th className="text-left px-3 py-2 text-[10px] font-medium text-gray-500 dark:text-gray-400">
-                                SKU
-                              </th>
-                              <th className="text-right px-3 py-2 text-[10px] font-medium text-gray-500 dark:text-gray-400">
-                                Qty
-                              </th>
-                              <th className="text-right px-3 py-2 text-[10px] font-medium text-gray-500 dark:text-gray-400">
-                                Unit Price
-                              </th>
-                              <th className="text-right px-3 py-2 text-[10px] font-medium text-gray-500 dark:text-gray-400">
-                                Discount
-                              </th>
-                              <th className="text-right px-3 py-2 text-[10px] font-medium text-gray-500 dark:text-gray-400">
-                                Tax
-                              </th>
-                              <th className="text-right px-3 py-2 text-[10px] font-medium text-gray-500 dark:text-gray-400">
-                                Total
-                              </th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
-                            {sale.saleLines.map((line) => (
-                              <tr key={line.saleLineID}>
-                                <td className="px-3 py-2">
-                                  <span className="text-gray-700 dark:text-gray-300">
-                                    {line.itemDescription || `Item #${line.itemID}`}
-                                  </span>
-                                  {line.note && (
-                                    <p className="text-[10px] text-gray-400 mt-0.5 italic">
-                                      {line.note}
-                                    </p>
-                                  )}
-                                </td>
-                                <td className="px-3 py-2">
-                                  <span className="font-mono text-gray-500 dark:text-gray-400">
-                                    {line.customSku || line.upc || line.ean || '—'}
-                                  </span>
-                                </td>
-                                <td className="px-3 py-2 text-right text-gray-600 dark:text-gray-400">
-                                  {line.unitQuantity}
-                                </td>
-                                <td className="px-3 py-2 text-right text-gray-600 dark:text-gray-400">
-                                  {formatCurrency(line.unitPrice)}
-                                </td>
-                                <td className="px-3 py-2 text-right text-gray-500 dark:text-gray-400">
-                                  {line.calcLineDiscount > 0
-                                    ? `-${formatCurrency(line.calcLineDiscount)}`
-                                    : '—'}
-                                </td>
-                                <td className="px-3 py-2 text-right text-gray-500 dark:text-gray-400">
-                                  {formatCurrency(line.calcTax1 + line.calcTax2)}
-                                </td>
-                                <td className="px-3 py-2 text-right font-medium text-gray-700 dark:text-gray-300">
-                                  {formatCurrency(line.calcTotal)}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Payments */}
-                  {sale.salePayments.length > 0 && (
-                    <div>
-                      <p className="text-[10px] uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-2 flex items-center gap-1">
-                        <CreditCard size={10} />
-                        Payments ({sale.salePayments.length})
-                      </p>
-                      <div className="bg-white dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-700 overflow-hidden">
-                        <table className="w-full text-xs">
-                          <thead>
-                            <tr className="bg-gray-50/60 dark:bg-gray-700/60 border-b border-gray-100 dark:border-gray-700">
-                              <th className="text-left px-3 py-2 text-[10px] font-medium text-gray-500 dark:text-gray-400">
-                                Payment Type
-                              </th>
-                              <th className="text-right px-3 py-2 text-[10px] font-medium text-gray-500 dark:text-gray-400">
-                                Amount
-                              </th>
-                              <th className="text-right px-3 py-2 text-[10px] font-medium text-gray-500 dark:text-gray-400">
-                                Tip
-                              </th>
-                              <th className="text-left px-3 py-2 text-[10px] font-medium text-gray-500 dark:text-gray-400">
-                                Date
-                              </th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
-                            {sale.salePayments.map((payment) => (
-                              <tr key={payment.salePaymentID}>
-                                <td className="px-3 py-2 text-gray-700 dark:text-gray-300">
-                                  {payment.paymentTypeName}
-                                </td>
-                                <td className="px-3 py-2 text-right font-medium text-gray-700 dark:text-gray-300">
-                                  {formatCurrency(payment.amount)}
-                                </td>
-                                <td className="px-3 py-2 text-right text-gray-500 dark:text-gray-400">
-                                  {payment.tipAmount > 0
-                                    ? formatCurrency(payment.tipAmount)
-                                    : '—'}
-                                </td>
-                                <td className="px-3 py-2 text-gray-500 dark:text-gray-400">
-                                  {formatDateTime(payment.createTime)}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Totals summary */}
-                  <div className="mt-4 flex justify-end">
-                    <div className="w-56 space-y-1 text-xs">
-                      <div className="flex justify-between text-gray-500 dark:text-gray-400">
-                        <span>Subtotal</span>
-                        <span>{formatCurrency(sale.calcSubtotal)}</span>
-                      </div>
-                      {sale.calcDiscount > 0 && (
-                        <div className="flex justify-between text-gray-500 dark:text-gray-400">
-                          <span>Discount</span>
-                          <span>-{formatCurrency(sale.calcDiscount)}</span>
-                        </div>
-                      )}
-                      <div className="flex justify-between text-gray-500 dark:text-gray-400">
-                        <span>Tax</span>
-                        <span>{formatCurrency(sale.calcTax1 + sale.calcTax2)}</span>
-                      </div>
-                      <div className="flex justify-between font-medium text-gray-900 dark:text-gray-100 pt-1 border-t border-gray-200 dark:border-gray-600">
-                        <span>Total</span>
-                        <span>{formatCurrency(sale.total)}</span>
-                      </div>
-                      {sale.balance !== 0 && (
-                        <div className="flex justify-between text-red-500">
-                          <span>Balance Due</span>
-                          <span>{formatCurrency(sale.balance)}</span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </motion.div>
-            </td>
-          </tr>
-        )}
-      </AnimatePresence>
-    </>
   )
 }

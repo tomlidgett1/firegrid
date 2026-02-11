@@ -170,6 +170,18 @@ interface ConditionalFormatRule {
   enabled: boolean
 }
 
+type ColFormatType = 'auto' | 'number' | 'currency' | 'percent' | 'date' | 'datetime' | 'text'
+
+interface ColumnFormat {
+  type: ColFormatType
+  decimals?: number          // decimal places for number/currency/percent (default 2)
+  currency?: string          // currency code e.g. "USD", "AUD", "EUR"
+  dateFormat?: string        // 'short' | 'medium' | 'long' | 'iso'
+  thousandSep?: boolean      // use thousand separators (default true)
+  prefix?: string            // custom prefix e.g. "$"
+  suffix?: string            // custom suffix e.g. "%"
+}
+
 interface CustomColumn {
   id: string
   name: string              // display name
@@ -198,6 +210,8 @@ interface DashboardWidget {
   chartConfig?: ChartConfig
   // Pivot-specific
   pivotConfig?: PivotConfig
+  // Column formatting
+  columnFormats?: Record<string, ColumnFormat>    // column key → display format
   // Conditional formatting
   conditionalFormats?: ConditionalFormatRule[]
   // Filters
@@ -525,6 +539,10 @@ export default function DashboardCreatorPage() {
 
   const updateWidgetConditionalFormats = useCallback((widgetId: string, rules: ConditionalFormatRule[]) => {
     setWidgets((prev) => prev.map((w) => w.i === widgetId ? { ...w, conditionalFormats: rules } : w))
+  }, [])
+
+  const updateWidgetColumnFormats = useCallback((widgetId: string, formats: Record<string, ColumnFormat>) => {
+    setWidgets((prev) => prev.map((w) => w.i === widgetId ? { ...w, columnFormats: formats } : w))
   }, [])
 
   const updateWidgetDisplayName = useCallback((widgetId: string, displayName: string) => {
@@ -1511,6 +1529,7 @@ export default function DashboardCreatorPage() {
                     onColumnAliasChange={(sp, alias) => updateWidgetColumnAlias(cWidget.i, sp, alias)}
                     onColumnOrderChange={(order) => updateWidgetColumnOrder(cWidget.i, order)}
                     onConditionalFormatsChange={(rules) => updateWidgetConditionalFormats(cWidget.i, rules)}
+                    onColumnFormatsChange={(formats) => updateWidgetColumnFormats(cWidget.i, formats)}
                     onClose={() => setConfiguringWidgetId(null)}
                   />
                 ) : cWidget.type === 'metric' ? (
@@ -1547,6 +1566,7 @@ export default function DashboardCreatorPage() {
                     savedTables={savedTables}
                     onApply={(config) => updateWidgetPivotConfig(cWidget.i, config)}
                     onConditionalFormatsChange={(rules) => updateWidgetConditionalFormats(cWidget.i, rules)}
+                    onColumnFormatsChange={(formats) => updateWidgetColumnFormats(cWidget.i, formats)}
                     onClose={() => setConfiguringWidgetId(null)}
                   />
                 ) : null}
@@ -2461,6 +2481,9 @@ function WidgetCard({
                       {previewCols.map((col) => {
                         const colKey = col.isCustom ? col.key : col.sourceCol!.sourcePath
                         const cellStyle = getCondStyle(condRules, row, colKey, 'cell')
+                        const rawVal = col.isCustom ? row[col.key] : (row[col.sourceCol!.sourcePath] ?? row[col.sourceCol!.alias])
+                        const colFmt = widget.columnFormats?.[colKey]
+                        const displayVal = colFmt ? applyColumnFormat(rawVal, colFmt) : formatCellValue(rawVal)
                         return (
                         <td
                           key={col.key}
@@ -2470,9 +2493,7 @@ function WidgetCard({
                           )}
                           style={cellStyle}
                         >
-                          {col.isCustom
-                            ? formatCellValue(row[col.key])
-                            : formatCellValue(row[col.sourceCol!.sourcePath] ?? row[col.sourceCol!.alias])}
+                          {displayVal}
                         </td>
                         )
                       })}
@@ -3664,6 +3685,310 @@ function ChartCard({
   )
 }
 
+/* ───────── Column Format Helpers ───────── */
+
+const COL_FORMAT_LABELS: Record<ColFormatType, string> = {
+  auto: 'Auto',
+  number: 'Number',
+  currency: 'Currency',
+  percent: 'Percentage',
+  date: 'Date',
+  datetime: 'Date & Time',
+  text: 'Plain Text',
+}
+
+const CURRENCY_OPTIONS = [
+  { code: 'USD', symbol: '$', label: 'USD ($)' },
+  { code: 'EUR', symbol: '€', label: 'EUR (€)' },
+  { code: 'GBP', symbol: '£', label: 'GBP (£)' },
+  { code: 'AUD', symbol: 'A$', label: 'AUD (A$)' },
+  { code: 'CAD', symbol: 'C$', label: 'CAD (C$)' },
+  { code: 'JPY', symbol: '¥', label: 'JPY (¥)' },
+  { code: 'CNY', symbol: '¥', label: 'CNY (¥)' },
+  { code: 'INR', symbol: '₹', label: 'INR (₹)' },
+  { code: 'NZD', symbol: 'NZ$', label: 'NZD (NZ$)' },
+  { code: 'CHF', symbol: 'CHF', label: 'CHF' },
+]
+
+const DATE_FORMAT_OPTIONS = [
+  { value: 'short', label: 'Short (1/2/26)' },
+  { value: 'medium', label: 'Medium (1 Feb 2026)' },
+  { value: 'long', label: 'Long (1 February 2026)' },
+  { value: 'iso', label: 'ISO (2026-02-01)' },
+]
+
+/** Format a raw cell value using a ColumnFormat config. */
+function applyColumnFormat(value: unknown, fmt: ColumnFormat | undefined): string {
+  if (value === null || value === undefined) return '—'
+
+  // Plain text — just stringify
+  if (!fmt || fmt.type === 'text') {
+    if (typeof value === 'object') return JSON.stringify(value)
+    return String(value)
+  }
+
+  // Auto — use the existing heuristic
+  if (fmt.type === 'auto') {
+    return formatCellValue(value)
+  }
+
+  const decimals = fmt.decimals ?? 2
+  const useSep = fmt.thousandSep !== false
+
+  // Number
+  if (fmt.type === 'number') {
+    const num = typeof value === 'number' ? value : parseFloat(String(value))
+    if (isNaN(num)) return String(value)
+    const formatted = useSep
+      ? num.toLocaleString(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals })
+      : num.toFixed(decimals)
+    return (fmt.prefix ?? '') + formatted + (fmt.suffix ?? '')
+  }
+
+  // Currency
+  if (fmt.type === 'currency') {
+    const num = typeof value === 'number' ? value : parseFloat(String(value))
+    if (isNaN(num)) return String(value)
+    try {
+      return num.toLocaleString(undefined, {
+        style: 'currency',
+        currency: fmt.currency || 'USD',
+        minimumFractionDigits: decimals,
+        maximumFractionDigits: decimals,
+      })
+    } catch {
+      return (fmt.prefix ?? '$') + num.toFixed(decimals)
+    }
+  }
+
+  // Percentage
+  if (fmt.type === 'percent') {
+    const num = typeof value === 'number' ? value : parseFloat(String(value))
+    if (isNaN(num)) return String(value)
+    // If the value is already 0-100 range, display as-is with %
+    // If < 1, treat as a ratio and multiply by 100
+    const pct = Math.abs(num) <= 1 && Math.abs(num) > 0 ? num * 100 : num
+    const formatted = useSep
+      ? pct.toLocaleString(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals })
+      : pct.toFixed(decimals)
+    return formatted + '%'
+  }
+
+  // Date
+  if (fmt.type === 'date' || fmt.type === 'datetime') {
+    const d = parseDate(value)
+    if (!d) return String(value)
+    const df = fmt.dateFormat || 'medium'
+    if (df === 'iso') {
+      return fmt.type === 'datetime'
+        ? d.toISOString().replace('T', ' ').slice(0, 19)
+        : d.toISOString().slice(0, 10)
+    }
+    const opts: Intl.DateTimeFormatOptions = df === 'short'
+      ? { day: 'numeric', month: 'numeric', year: '2-digit' }
+      : df === 'long'
+        ? { day: 'numeric', month: 'long', year: 'numeric' }
+        : { day: 'numeric', month: 'short', year: 'numeric' }
+    if (fmt.type === 'datetime') {
+      opts.hour = '2-digit'
+      opts.minute = '2-digit'
+    }
+    return d.toLocaleDateString(undefined, opts)
+  }
+
+  return String(value)
+}
+
+/** Shared column formatting editor section for config panels. */
+function ColumnFormattingSection({
+  columns,
+  columnFormats,
+  onChange,
+}: {
+  columns: { key: string; label: string }[]
+  columnFormats: Record<string, ColumnFormat>
+  onChange: (formats: Record<string, ColumnFormat>) => void
+}) {
+  const [expanded, setExpanded] = useState(Object.keys(columnFormats).length > 0)
+  const [selectedCol, setSelectedCol] = useState<string>(columns[0]?.key ?? '')
+
+  const currentFmt = columnFormats[selectedCol] ?? { type: 'auto' as ColFormatType }
+
+  const updateFmt = (patch: Partial<ColumnFormat>) => {
+    const updated = { ...columnFormats, [selectedCol]: { ...currentFmt, ...patch } }
+    // Remove entry if set back to auto with no custom settings
+    if (updated[selectedCol].type === 'auto' && !updated[selectedCol].prefix && !updated[selectedCol].suffix) {
+      delete updated[selectedCol]
+    }
+    onChange(updated)
+  }
+
+  const formattedCount = Object.keys(columnFormats).length
+
+  return (
+    <div className="border-t border-gray-100">
+      <button
+        onClick={() => setExpanded((v) => !v)}
+        className="w-full flex items-center justify-between px-4 py-2.5 text-left hover:bg-gray-50 transition-colors cursor-pointer"
+      >
+        <span className="flex items-center gap-1.5 text-[10px] font-medium text-gray-500 uppercase tracking-wider">
+          <Type size={10} />
+          Column Formatting
+          {formattedCount > 0 && (
+            <span className="ml-1 text-[9px] bg-gray-200 text-gray-600 px-1.5 py-0.5 rounded-md">{formattedCount}</span>
+          )}
+        </span>
+        <ChevronDown className={cn('h-3 w-3 text-gray-400 transition-transform duration-200', expanded && 'rotate-180')} />
+      </button>
+
+      <AnimatePresence>
+        {expanded && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.4, ease: [0.04, 0.62, 0.23, 0.98] }}
+            className="overflow-hidden"
+          >
+            <div className="px-4 pb-3 space-y-2.5">
+              {/* Column selector */}
+              <div>
+                <label className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Column</label>
+                <select
+                  value={selectedCol}
+                  onChange={(e) => setSelectedCol(e.target.value)}
+                  className="w-full text-[11px] border border-gray-200 rounded-md px-2 py-1.5 text-gray-700 bg-white focus:outline-none focus:border-gray-400 mt-0.5"
+                >
+                  {columns.map((c) => (
+                    <option key={c.key} value={c.key}>
+                      {c.label}{columnFormats[c.key] ? ` (${COL_FORMAT_LABELS[columnFormats[c.key].type]})` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Format type */}
+              <div>
+                <label className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Format</label>
+                <select
+                  value={currentFmt.type}
+                  onChange={(e) => updateFmt({ type: e.target.value as ColFormatType })}
+                  className="w-full text-[11px] border border-gray-200 rounded-md px-2 py-1.5 text-gray-700 bg-white focus:outline-none focus:border-gray-400 mt-0.5"
+                >
+                  {Object.entries(COL_FORMAT_LABELS).map(([k, v]) => (
+                    <option key={k} value={k}>{v}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Number / Currency / Percent options */}
+              {(currentFmt.type === 'number' || currentFmt.type === 'currency' || currentFmt.type === 'percent') && (
+                <div className="flex items-center gap-2">
+                  <div className="flex-1">
+                    <label className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Decimals</label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={10}
+                      value={currentFmt.decimals ?? 2}
+                      onChange={(e) => updateFmt({ decimals: parseInt(e.target.value) || 0 })}
+                      className="w-full text-[11px] border border-gray-200 rounded-md px-2 py-1.5 text-gray-700 focus:outline-none focus:border-gray-400 mt-0.5"
+                    />
+                  </div>
+                  <div className="flex-1">
+                    <label className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">1000 sep</label>
+                    <select
+                      value={currentFmt.thousandSep !== false ? 'yes' : 'no'}
+                      onChange={(e) => updateFmt({ thousandSep: e.target.value === 'yes' })}
+                      className="w-full text-[11px] border border-gray-200 rounded-md px-2 py-1.5 text-gray-700 bg-white focus:outline-none focus:border-gray-400 mt-0.5"
+                    >
+                      <option value="yes">Yes</option>
+                      <option value="no">No</option>
+                    </select>
+                  </div>
+                </div>
+              )}
+
+              {/* Currency selector */}
+              {currentFmt.type === 'currency' && (
+                <div>
+                  <label className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Currency</label>
+                  <select
+                    value={currentFmt.currency || 'USD'}
+                    onChange={(e) => updateFmt({ currency: e.target.value })}
+                    className="w-full text-[11px] border border-gray-200 rounded-md px-2 py-1.5 text-gray-700 bg-white focus:outline-none focus:border-gray-400 mt-0.5"
+                  >
+                    {CURRENCY_OPTIONS.map((c) => (
+                      <option key={c.code} value={c.code}>{c.label}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* Date format */}
+              {(currentFmt.type === 'date' || currentFmt.type === 'datetime') && (
+                <div>
+                  <label className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Date Style</label>
+                  <select
+                    value={currentFmt.dateFormat || 'medium'}
+                    onChange={(e) => updateFmt({ dateFormat: e.target.value })}
+                    className="w-full text-[11px] border border-gray-200 rounded-md px-2 py-1.5 text-gray-700 bg-white focus:outline-none focus:border-gray-400 mt-0.5"
+                  >
+                    {DATE_FORMAT_OPTIONS.map((o) => (
+                      <option key={o.value} value={o.value}>{o.label}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* Custom prefix/suffix for number */}
+              {currentFmt.type === 'number' && (
+                <div className="flex items-center gap-2">
+                  <div className="flex-1">
+                    <label className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Prefix</label>
+                    <input
+                      type="text"
+                      value={currentFmt.prefix ?? ''}
+                      onChange={(e) => updateFmt({ prefix: e.target.value })}
+                      placeholder="e.g. $"
+                      className="w-full text-[11px] border border-gray-200 rounded-md px-2 py-1.5 text-gray-700 focus:outline-none focus:border-gray-400 mt-0.5"
+                    />
+                  </div>
+                  <div className="flex-1">
+                    <label className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Suffix</label>
+                    <input
+                      type="text"
+                      value={currentFmt.suffix ?? ''}
+                      onChange={(e) => updateFmt({ suffix: e.target.value })}
+                      placeholder="e.g. kg"
+                      className="w-full text-[11px] border border-gray-200 rounded-md px-2 py-1.5 text-gray-700 focus:outline-none focus:border-gray-400 mt-0.5"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Preview */}
+              {currentFmt.type !== 'auto' && (
+                <div className="bg-gray-50 rounded-md px-2.5 py-1.5">
+                  <p className="text-[9px] text-gray-400 uppercase tracking-wider mb-0.5">Preview</p>
+                  <p className="text-[11px] text-gray-700 font-medium tabular-nums">
+                    {currentFmt.type === 'number' ? applyColumnFormat(1234567.89, currentFmt) :
+                     currentFmt.type === 'currency' ? applyColumnFormat(1234567.89, currentFmt) :
+                     currentFmt.type === 'percent' ? applyColumnFormat(0.4567, currentFmt) :
+                     currentFmt.type === 'date' ? applyColumnFormat('2026-02-11T10:30:00Z', currentFmt) :
+                     currentFmt.type === 'datetime' ? applyColumnFormat('2026-02-11T10:30:00Z', currentFmt) :
+                     applyColumnFormat('Sample text', currentFmt)}
+                  </p>
+                </div>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  )
+}
+
 /* ───────── Conditional Format Helpers ───────── */
 
 const COND_OP_LABELS: Record<CondFormatOperator, string> = {
@@ -3983,6 +4308,7 @@ function TableConfigPanel({
   onColumnAliasChange,
   onColumnOrderChange,
   onConditionalFormatsChange,
+  onColumnFormatsChange,
   onClose,
 }: {
   widget: DashboardWidget
@@ -3991,6 +4317,7 @@ function TableConfigPanel({
   onColumnAliasChange: (sourcePath: string, alias: string) => void
   onColumnOrderChange: (order: string[]) => void
   onConditionalFormatsChange: (rules: ConditionalFormatRule[]) => void
+  onColumnFormatsChange: (formats: Record<string, ColumnFormat>) => void
   onClose: () => void
 }) {
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set())
@@ -4264,6 +4591,13 @@ function TableConfigPanel({
             </button>
           </div>
         )}
+
+        {/* Column Formatting */}
+        <ColumnFormattingSection
+          columns={allCols.map((c) => ({ key: c.key, label: c.name }))}
+          columnFormats={widget.columnFormats ?? {}}
+          onChange={onColumnFormatsChange}
+        />
 
         {/* Conditional Formatting */}
         <ConditionalFormattingSection
@@ -4923,12 +5257,14 @@ function PivotConfigPanel({
   savedTables,
   onApply,
   onConditionalFormatsChange,
+  onColumnFormatsChange,
   onClose,
 }: {
   widget: DashboardWidget
   savedTables: SavedTable[]
   onApply: (config: PivotConfig) => void
   onConditionalFormatsChange: (rules: ConditionalFormatRule[]) => void
+  onColumnFormatsChange: (formats: Record<string, ColumnFormat>) => void
   onClose: () => void
 }) {
   const config = widget.pivotConfig
@@ -5123,6 +5459,18 @@ function PivotConfigPanel({
               </button>
             </div>
           </>
+        )}
+
+        {/* Column Formatting */}
+        {draftTableId && (
+          <ColumnFormattingSection
+            columns={[
+              ...draftRowCols.map((c) => ({ key: c, label: c })),
+              ...draftValues.map((v) => ({ key: v.column || v.id, label: v.label || `${AGGREGATION_LABELS[v.aggregation]}${v.column ? ` of ${v.column}` : ''}` })),
+            ]}
+            columnFormats={widget.columnFormats ?? {}}
+            onChange={onColumnFormatsChange}
+          />
         )}
 
         {/* Conditional Formatting */}
@@ -5486,8 +5834,10 @@ function PivotCard({
                   {row.keys.map((k, ki) => {
                     const rh = pivotData.rowHeaders[ki]
                     const cellStyle = getCondStyle(condRules, syntheticRow, rh, 'cell')
+                    const colFmt = widget.columnFormats?.[rh]
+                    const displayVal = colFmt ? applyColumnFormat(k, colFmt) : String(k ?? '—')
                     return (
-                    <td key={ki} className="px-2.5 py-1.5 text-gray-700 border-b border-r border-gray-100 font-medium whitespace-nowrap overflow-hidden text-ellipsis" style={cellStyle}>{String(k ?? '—')}</td>
+                    <td key={ki} className="px-2.5 py-1.5 text-gray-700 border-b border-r border-gray-100 font-medium whitespace-nowrap overflow-hidden text-ellipsis" style={cellStyle}>{displayVal}</td>
                     )
                   })}
                   {row.values.map((v, vi) => {
@@ -5495,9 +5845,11 @@ function PivotCard({
                     const vc = config?.values[vcIdx]
                     const colKey = vc ? (vc.column || vc.id) : String(vi)
                     const cellStyle = getCondStyle(condRules, syntheticRow, colKey, 'cell')
+                    const colFmt = widget.columnFormats?.[colKey]
+                    const displayVal = colFmt ? applyColumnFormat(v, colFmt) : (v != null ? (typeof v === 'number' ? v.toLocaleString(undefined, { maximumFractionDigits: 2 }) : String(v)) : '—')
                     return (
                     <td key={vi} className="px-2.5 py-1.5 text-right text-gray-600 border-b border-gray-100 tabular-nums whitespace-nowrap overflow-hidden text-ellipsis" style={cellStyle}>
-                      {v != null ? (typeof v === 'number' ? v.toLocaleString(undefined, { maximumFractionDigits: 2 }) : String(v)) : '—'}
+                      {displayVal}
                     </td>
                     )
                   })}
