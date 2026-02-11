@@ -330,8 +330,7 @@ export async function syncSales(
     `${LS_API_BASE}/Account/${accountId}/Sale.json` +
     `?load_relations=${encodeURIComponent('["SaleLines","SaleLines.Item","SalePayments","SalePayments.PaymentType","Customer","Employee","Shop"]')}` +
     `&limit=100` +
-    `&orderby=updatetime` +
-    `&orderby_desc=1`
+    `&sort=-updatetime`
 
   // Incremental sync — only fetch sales updated after last sync
   if (lastSync) {

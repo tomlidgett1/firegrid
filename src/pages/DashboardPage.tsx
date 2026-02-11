@@ -426,7 +426,9 @@ export default function DashboardPage() {
                 <span className="text-gray-300 dark:text-gray-600">/</span>
                 <ProjectSwitcher
                   currentProjectId={activeProject ?? undefined}
+                  recentProjects={recentProjects}
                   onAddProject={() => setShowConnectForm(true)}
+                  onRemoveProject={handleRemoveProject}
                 />
               </>
             )}

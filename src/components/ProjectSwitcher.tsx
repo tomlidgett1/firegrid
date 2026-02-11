@@ -12,7 +12,7 @@ import {
 
 const RECENT_PROJECTS_KEY = 'firegrid_recent_projects'
 
-function getRecentProjects(): string[] {
+function getCachedProjects(): string[] {
   try {
     return JSON.parse(localStorage.getItem(RECENT_PROJECTS_KEY) || '[]')
   } catch {
@@ -20,29 +20,23 @@ function getRecentProjects(): string[] {
   }
 }
 
-function removeRecentProject(projectId: string) {
-  const recent = getRecentProjects().filter((p) => p !== projectId)
-  localStorage.setItem(RECENT_PROJECTS_KEY, JSON.stringify(recent))
-}
-
 interface ProjectSwitcherProps {
   currentProjectId?: string
+  /** Full list of recent project IDs (managed by parent via Firestore). */
+  recentProjects?: string[]
   /** When provided, called instead of navigating to /dashboard */
   onAddProject?: () => void
+  /** Called when the user removes a project — parent handles Firestore + cache sync. */
+  onRemoveProject?: (projectId: string) => void
 }
 
-export default function ProjectSwitcher({ currentProjectId, onAddProject }: ProjectSwitcherProps) {
+export default function ProjectSwitcher({ currentProjectId, recentProjects: recentProjectsProp, onAddProject, onRemoveProject }: ProjectSwitcherProps) {
   const [open, setOpen] = useState(false)
-  const [recentProjects, setRecentProjects] = useState<string[]>(getRecentProjects())
   const containerRef = useRef<HTMLDivElement>(null)
   const navigate = useNavigate()
 
-  // Refresh recent projects when dropdown opens
-  useEffect(() => {
-    if (open) {
-      setRecentProjects(getRecentProjects())
-    }
-  }, [open])
+  // Use prop if provided (Firestore-synced), otherwise fall back to localStorage cache
+  const recentProjects = recentProjectsProp ?? getCachedProjects()
 
   // Close on outside click
   useEffect(() => {
@@ -75,8 +69,7 @@ export default function ProjectSwitcher({ currentProjectId, onAddProject }: Proj
 
   const handleRemoveProject = (projectId: string, e: React.MouseEvent) => {
     e.stopPropagation()
-    removeRecentProject(projectId)
-    setRecentProjects(getRecentProjects())
+    onRemoveProject?.(projectId)
   }
 
   const handleAddProject = () => {
