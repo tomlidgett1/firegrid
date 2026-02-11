@@ -328,7 +328,7 @@ export async function syncSales(
   // Build initial URL with relations
   let nextUrl: string | null =
     `${LS_API_BASE}/Account/${accountId}/Sale.json` +
-    `?load_relations=${encodeURIComponent('["SaleLines","SaleLines.Item","SalePayments","SalePayments.PaymentType","Customer","Employee","Shop"]')}` +
+    `?load_relations=${encodeURIComponent('["SaleLines","SaleLines.Item","SalePayments","SalePayments.PaymentType","Customer","Customer.Contact"]')}` +
     `&limit=100` +
     `&sort=-updateTime`
 
