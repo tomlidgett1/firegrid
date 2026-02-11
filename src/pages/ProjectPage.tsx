@@ -8,7 +8,7 @@ import {
   discoverSubCollectionsFromGroup,
 } from '@/lib/firestore-rest'
 import { discoverSchema } from '@/lib/utils'
-import type { CollectionInfo, FieldInfo, DocumentData } from '@/lib/types'
+import type { CollectionInfo, FieldInfo, DocumentData, ColumnConfig } from '@/lib/types'
 import { cn } from '@/lib/utils'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
@@ -24,10 +24,14 @@ import {
   FolderTree,
   Layers,
   Wand2,
+  FileSpreadsheet,
 } from 'lucide-react'
+import { db } from '@/lib/firebase'
+import { doc, setDoc, collection as firestoreCollection, serverTimestamp } from 'firebase/firestore'
 import ProjectSwitcher from '@/components/ProjectSwitcher'
 import DarkModeToggle from '@/components/DarkModeToggle'
 import AutoTableBuilder from '@/components/AutoTableBuilder'
+import CsvUploadModal from '@/components/CsvUploadModal'
 
 // ---- Recursive Sub-collection Tree ----
 
@@ -224,6 +228,7 @@ export default function ProjectPage() {
   const [error, setError] = useState<string | null>(null)
 
   const [showAutoBuilder, setShowAutoBuilder] = useState(false)
+  const [showCsvUpload, setShowCsvUpload] = useState(false)
   const [expandedCollection, setExpandedCollection] = useState<string | null>(null)
   const [expandedState, setExpandedState] = useState<ExpandedState>({
     schema: [],
@@ -279,6 +284,54 @@ export default function ProjectPage() {
     navigateToTable(collectionId, true)
   }
 
+  // ---- CSV import handler ----
+  const CSV_CHUNK_SIZE = 400
+
+  const handleCsvSave = useCallback(
+    async (csvTableName: string, headers: string[], rows: Record<string, unknown>[]) => {
+      if (!user?.uid || !db) throw new Error('Not authenticated')
+
+      const id = crypto.randomUUID()
+      const columns: ColumnConfig[] = headers.map((header, idx) => ({
+        id: header,
+        sourcePath: header,
+        alias: header,
+        dataType: 'string',
+        visible: true,
+        order: idx,
+      }))
+
+      // Write row data in chunks to a subcollection
+      const chunksRef = firestoreCollection(db, 'users', user.uid, 'tables', id, 'csvChunks')
+      const totalChunks = Math.ceil(rows.length / CSV_CHUNK_SIZE)
+      const chunkPromises: Promise<void>[] = []
+
+      for (let i = 0; i < totalChunks; i++) {
+        const slice = rows.slice(i * CSV_CHUNK_SIZE, (i + 1) * CSV_CHUNK_SIZE)
+        chunkPromises.push(
+          setDoc(doc(chunksRef, String(i)), { rows: slice })
+        )
+      }
+      await Promise.all(chunkPromises)
+
+      // Save metadata in the table document
+      await setDoc(doc(db, 'users', user.uid, 'tables', id), {
+        tableName: csvTableName,
+        projectId: '__csv__',
+        collectionPath: csvTableName,
+        isCollectionGroup: false,
+        columns,
+        csvChunkCount: totalChunks,
+        csvRowCount: rows.length,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      })
+
+      navigate(`/csv-table/${id}`)
+    },
+    [user?.uid, navigate]
+  )
+
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
       {/* Header */}
@@ -322,15 +375,24 @@ export default function ProjectPage() {
               Browse collections and sub-collections. Use "Explore" to drill into deeper nesting levels.
             </p>
           </div>
-          <button
-            onClick={() => setShowAutoBuilder(true)}
-            disabled={loading || collections.length === 0}
-            className="flex items-center gap-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 text-gray-700 dark:text-gray-300 text-sm font-medium rounded-md px-3.5 py-2 transition-colors shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            <Wand2 size={14} className="text-gray-500 dark:text-gray-400" />
-            Auto-Build
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 rounded-md">Beta</span>
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={() => setShowCsvUpload(true)}
+              className="flex items-center gap-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 text-gray-700 dark:text-gray-300 text-sm font-medium rounded-md px-3.5 py-2 transition-colors"
+            >
+              <FileSpreadsheet size={14} className="text-gray-500 dark:text-gray-400" />
+              Import CSV
+            </button>
+            <button
+              onClick={() => setShowAutoBuilder(true)}
+              disabled={loading || collections.length === 0}
+              className="flex items-center gap-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600 text-gray-700 dark:text-gray-300 text-sm font-medium rounded-md px-3.5 py-2 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <Wand2 size={14} className="text-gray-500 dark:text-gray-400" />
+              Auto-Build
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 rounded-md">Beta</span>
+            </button>
+          </div>
         </div>
 
         {error && (
@@ -548,6 +610,13 @@ export default function ProjectPage() {
           }}
         />
       )}
+
+      {/* CSV Upload Modal */}
+      <CsvUploadModal
+        open={showCsvUpload}
+        onClose={() => setShowCsvUpload(false)}
+        onSave={handleCsvSave}
+      />
     </div>
   )
 }

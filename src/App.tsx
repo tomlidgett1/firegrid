@@ -8,8 +8,11 @@ import ProjectPage from '@/pages/ProjectPage'
 import TableBuilderPage from '@/pages/TableBuilderPage'
 import QueryPage from '@/pages/QueryPage'
 import QueryTablePage from '@/pages/QueryTablePage'
+import CsvTablePage from '@/pages/CsvTablePage'
 import DashboardCreatorPage from '@/pages/DashboardCreatorPage'
 import CollectionExplorerPage from '@/pages/CollectionExplorerPage'
+import LightspeedCallbackPage from '@/pages/LightspeedCallbackPage'
+import SalesPage from '@/pages/SalesPage'
 import { Loader2, RefreshCw } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 
@@ -132,6 +135,14 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/csv-table/:tableId"
+        element={
+          <ProtectedRoute>
+            <CsvTablePage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/dashboard-builder"
         element={
           <ProtectedRoute>
@@ -144,6 +155,22 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <DashboardCreatorPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/lightspeed/callback"
+        element={
+          <ProtectedRoute>
+            <LightspeedCallbackPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/sales"
+        element={
+          <ProtectedRoute>
+            <SalesPage />
           </ProtectedRoute>
         }
       />

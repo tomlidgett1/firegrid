@@ -61,6 +61,111 @@ export interface SavedTable {
   queryData?: Record<string, unknown>[]
 }
 
+// ---- Lightspeed POS Integration ----
+export interface LightspeedConnection {
+  accountId: string
+  accountName: string
+  accessToken: string
+  refreshToken: string
+  expiresAt: Date
+  lastSalesSync: Date | null
+  connectedAt: Date
+}
+
+export interface LightspeedSaleLine {
+  saleLineID: string
+  itemID: string
+  itemDescription: string
+  unitQuantity: number
+  unitPrice: number
+  avgCost: number
+  fifoCost: number
+  normalPrice: number
+  discountAmount: number
+  discountPercent: number
+  tax: boolean
+  tax1Rate: number
+  tax2Rate: number
+  calcTotal: number
+  calcSubtotal: number
+  calcTax1: number
+  calcTax2: number
+  calcLineDiscount: number
+  taxTotal: number
+  isLayaway: boolean
+  isWorkorder: boolean
+  isSpecialOrder: boolean
+  note: string
+  customSku: string
+  manufacturerSku: string
+  upc: string
+  ean: string
+  createTime: string
+  timeStamp: string
+}
+
+export interface LightspeedSalePayment {
+  salePaymentID: string
+  amount: number
+  tipAmount: number
+  paymentTypeName: string
+  paymentTypeID: string
+  createTime: string
+}
+
+export interface LightspeedSale {
+  saleID: string
+  timeStamp: string
+  completed: boolean
+  archived: boolean
+  voided: boolean
+  createTime: string
+  updateTime: string
+  completeTime: string | null
+  referenceNumber: string
+  referenceNumberSource: string
+  ticketNumber: string
+  tax1Rate: number
+  tax2Rate: number
+  change: number
+  tipEnabled: boolean
+  receiptPreference: string
+  displayableSubtotal: number
+  calcDiscount: number
+  calcTotal: number
+  calcSubtotal: number
+  calcTaxable: number
+  calcNonTaxable: number
+  calcAvgCost: number
+  calcFIFOCost: number
+  calcTax1: number
+  calcTax2: number
+  calcPayments: number
+  calcTips: number
+  total: number
+  totalDue: number
+  displayableTotal: number
+  balance: number
+  // Denormalised customer info
+  customerID: string
+  customerFirstName: string
+  customerLastName: string
+  // Denormalised employee info
+  employeeID: string
+  employeeFirstName: string
+  employeeLastName: string
+  // Shop / register
+  registerID: string
+  shopID: string
+  shopName: string
+  taxCategoryID: string
+  // Line items + payments
+  saleLines: LightspeedSaleLine[]
+  salePayments: LightspeedSalePayment[]
+  // Sync metadata
+  syncedAt: Date
+}
+
 // ---- Firestore REST API types ----
 export interface FirestoreValue {
   stringValue?: string

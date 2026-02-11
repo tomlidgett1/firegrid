@@ -4,7 +4,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { exportToCSV, exportToJSON, copyToClipboard } from '@/lib/utils'
 import type { ColumnConfig, SavedTable } from '@/lib/types'
 import { db } from '@/lib/firebase'
-import { doc, getDoc } from 'firebase/firestore'
+import { doc, getDoc, collection, getDocs, query, orderBy } from 'firebase/firestore'
 import {
   useReactTable,
   getCoreRowModel,
@@ -32,6 +32,7 @@ import {
   ChevronsRight,
   Terminal,
   Columns3,
+  FileSpreadsheet,
 } from 'lucide-react'
 import DarkModeToggle from '@/components/DarkModeToggle'
 
@@ -44,6 +45,7 @@ export default function QueryTablePage() {
   const [tableName, setTableName] = useState('')
   const [columns, setColumns] = useState<ColumnConfig[]>([])
   const [querySql, setQuerySql] = useState('')
+  const [sourceType, setSourceType] = useState<'query' | 'csv'>('query')
   const [flatDocs, setFlatDocs] = useState<Record<string, unknown>[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -67,11 +69,33 @@ export default function QueryTablePage() {
           return
         }
 
-        const data = snap.data() as Omit<SavedTable, 'id'>
+        const data = snap.data() as Omit<SavedTable, 'id'> & { csvChunkCount?: number }
         setTableName(data.tableName)
         setColumns(data.columns ?? [])
         setQuerySql(data.querySql ?? data.collectionPath ?? '')
-        setFlatDocs(data.queryData ?? [])
+        const isCsv = data.projectId === '__csv__'
+        setSourceType(isCsv ? 'csv' : 'query')
+
+        if (isCsv && data.csvChunkCount && data.csvChunkCount > 0) {
+          // Load CSV row data from Firestore subcollection chunks
+          const chunksRef = collection(db!, 'users', user.uid, 'tables', tableId, 'csvChunks')
+          const chunksSnap = await getDocs(query(chunksRef, orderBy('__name__')))
+          const allRows: Record<string, unknown>[] = []
+          // Sort by document ID (numeric string) to preserve order
+          const sortedDocs = chunksSnap.docs.sort(
+            (a, b) => Number(a.id) - Number(b.id)
+          )
+          for (const chunkDoc of sortedDocs) {
+            const chunkData = chunkDoc.data()
+            if (Array.isArray(chunkData.rows)) {
+              allRows.push(...chunkData.rows)
+            }
+          }
+          setFlatDocs(allRows)
+        } else {
+          // Fallback: inline queryData (for query tables or legacy small CSV tables)
+          setFlatDocs(data.queryData ?? [])
+        }
       } catch (err) {
         console.error('Failed to load query table:', err)
         setError(err instanceof Error ? err.message : 'Failed to load table')
@@ -194,21 +218,26 @@ export default function QueryTablePage() {
             <span className="text-gray-300 dark:text-gray-600">/</span>
             <span className="text-sm font-medium text-gray-700 dark:text-gray-300">{tableName}</span>
             <span className="text-[10px] font-medium text-gray-500 bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 rounded-md flex items-center gap-1">
-              <Terminal size={10} />
-              SQL Query
+              {sourceType === 'csv' ? (
+                <><FileSpreadsheet size={10} /> CSV Import</>
+              ) : (
+                <><Terminal size={10} /> SQL Query</>
+              )}
             </span>
           </div>
 
           {/* Right: Actions */}
           <div className="flex items-center gap-2">
-            {/* Open in SQL Editor */}
-            <button
-              onClick={() => navigate(`/query?sql=${encodeURIComponent(querySql)}&autorun=true`)}
-              className="flex items-center gap-1.5 text-xs font-medium text-gray-500 hover:text-gray-700 hover:bg-gray-100 dark:text-gray-400 dark:hover:text-gray-200 dark:hover:bg-gray-700 px-2.5 py-1.5 rounded-md transition-colors"
-            >
-              <Terminal size={13} />
-              Open in SQL Editor
-            </button>
+            {/* Open in SQL Editor — only for query tables */}
+            {sourceType === 'query' && (
+              <button
+                onClick={() => navigate(`/query?sql=${encodeURIComponent(querySql)}&autorun=true`)}
+                className="flex items-center gap-1.5 text-xs font-medium text-gray-500 hover:text-gray-700 hover:bg-gray-100 dark:text-gray-400 dark:hover:text-gray-200 dark:hover:bg-gray-700 px-2.5 py-1.5 rounded-md transition-colors"
+              >
+                <Terminal size={13} />
+                Open in SQL Editor
+              </button>
+            )}
 
             <div className="w-px h-6 bg-gray-200 dark:bg-gray-600 mx-1" />
 
@@ -267,9 +296,9 @@ export default function QueryTablePage() {
           </span>
         </div>
 
-        {/* SQL preview bar */}
-        {querySql && (
-          <div className="px-4 py-1.5 bg-gray-50 border-b border-gray-200 shrink-0">
+        {/* SQL preview bar — only for query tables */}
+        {sourceType === 'query' && querySql && (
+          <div className="px-4 py-1.5 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 shrink-0">
             <p className="text-[11px] text-gray-400 font-mono truncate" title={querySql}>
               <span className="text-gray-500 font-medium">SQL:</span> {querySql}
             </p>
@@ -324,13 +353,15 @@ export default function QueryTablePage() {
 
           {flatDocs.length === 0 && visibleColumns.length > 0 && (
             <div className="flex flex-col items-center justify-center h-48 text-sm text-gray-400 gap-2">
-              <p>No data stored for this query.</p>
-              <button
-                onClick={() => navigate(`/query?sql=${encodeURIComponent(querySql)}&autorun=true`)}
-                className="text-xs font-medium text-gray-600 hover:text-gray-900 bg-gray-100 hover:bg-gray-200 px-3 py-1.5 rounded-md transition-colors"
-              >
-                Open in SQL Editor to re-run
-              </button>
+              <p>{sourceType === 'csv' ? 'No data in this CSV table.' : 'No data stored for this query.'}</p>
+              {sourceType === 'query' && (
+                <button
+                  onClick={() => navigate(`/query?sql=${encodeURIComponent(querySql)}&autorun=true`)}
+                  className="text-xs font-medium text-gray-600 hover:text-gray-900 bg-gray-100 hover:bg-gray-200 dark:text-gray-400 dark:bg-gray-700 dark:hover:bg-gray-600 px-3 py-1.5 rounded-md transition-colors"
+                >
+                  Open in SQL Editor to re-run
+                </button>
+              )}
             </div>
           )}
         </div>

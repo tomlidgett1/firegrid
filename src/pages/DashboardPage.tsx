@@ -27,11 +27,15 @@ import {
   Send,
   Check,
   Search,
+  FileSpreadsheet,
+  ShoppingCart,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { trackProjectConnected, trackFeedbackSent, trackPageView } from '@/lib/metrics'
 import ProjectSwitcher from '@/components/ProjectSwitcher'
 import DarkModeToggle from '@/components/DarkModeToggle'
+import { buildLightspeedAuthUrl, getLightspeedConnection, disconnectLightspeed } from '@/lib/lightspeed'
+import type { LightspeedConnection } from '@/lib/types'
 
 const RECENT_PROJECTS_KEY = 'firegrid_recent_projects'
 
@@ -101,6 +105,7 @@ export default function DashboardPage() {
   const [feedbackText, setFeedbackText] = useState('')
   const [feedbackSending, setFeedbackSending] = useState(false)
   const [feedbackSent, setFeedbackSent] = useState(false)
+  const [lsConnection, setLsConnection] = useState<LightspeedConnection | null>(null)
   const userMenuRef = useRef<HTMLDivElement>(null)
   const feedbackRef = useRef<HTMLDivElement>(null)
 
@@ -112,6 +117,12 @@ export default function DashboardPage() {
     if (user?.uid) {
       setFavourites(loadFavourites(user.uid))
     }
+  }, [user?.uid])
+
+  // Load Lightspeed connection status
+  useEffect(() => {
+    if (!user?.uid) return
+    getLightspeedConnection(user.uid).then(setLsConnection).catch(() => setLsConnection(null))
   }, [user?.uid])
 
   // Track page view
@@ -395,6 +406,50 @@ export default function DashboardPage() {
                       </p>
                     </div>
                     <div className="py-1">
+                      {/* Lightspeed connection */}
+                      {lsConnection ? (
+                        <>
+                          <button
+                            onClick={() => {
+                              setShowUserMenu(false)
+                              navigate('/sales')
+                            }}
+                            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+                          >
+                            <ShoppingCart size={14} className="text-gray-400" />
+                            View Sales
+                            <span className="ml-auto w-1.5 h-1.5 rounded-full bg-green-400" />
+                          </button>
+                          <button
+                            onClick={async () => {
+                              if (!confirm('Disconnect Lightspeed? Your sales data will remain in Firestore.')) return
+                              setShowUserMenu(false)
+                              if (user?.uid) {
+                                await disconnectLightspeed(user.uid)
+                                setLsConnection(null)
+                              }
+                            }}
+                            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+                          >
+                            <X size={14} className="text-gray-400" />
+                            Disconnect Lightspeed
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          onClick={() => {
+                            setShowUserMenu(false)
+                            window.location.href = buildLightspeedAuthUrl()
+                          }}
+                          className="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+                        >
+                          <ShoppingCart size={14} className="text-gray-400" />
+                          Connect Lightspeed
+                        </button>
+                      )}
+
+                      <div className="my-1 border-t border-gray-100 dark:border-gray-700" />
+
                       <button
                         onClick={() => {
                           setShowUserMenu(false)
@@ -548,6 +603,32 @@ export default function DashboardPage() {
               <p className="text-sm font-medium text-gray-900 dark:text-gray-100">New Dashboard</p>
               <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">Drag-and-drop builder</p>
             </button>
+
+            {/* Lightspeed Sales — only show when connected */}
+            {lsConnection && (
+              <button
+                onClick={() => navigate('/sales')}
+                className="group bg-white dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-700 p-4 text-left hover:border-gray-300 dark:hover:border-gray-600 transition-colors"
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <div className="w-8 h-8 rounded-md bg-gray-100 dark:bg-gray-700 flex items-center justify-center">
+                    <ShoppingCart size={16} className="text-gray-500 dark:text-gray-400" />
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-green-400" />
+                    <ArrowRight size={14} className="text-gray-300 group-hover:text-gray-400 transition-colors" />
+                  </div>
+                </div>
+                <p className="text-sm font-medium text-gray-900 dark:text-gray-100">Lightspeed Sales</p>
+                <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+                  {lsConnection.accountName}
+                  {lsConnection.lastSalesSync
+                    ? ` · Last sync ${lsConnection.lastSalesSync.toLocaleDateString()}`
+                    : ' · Not synced yet'}
+                </p>
+              </button>
+            )}
+
           </div>
         )}
 
@@ -685,11 +766,13 @@ export default function DashboardPage() {
                   <div
                     key={table.id}
                     onClick={() =>
-                      table.projectId === '__query__'
-                        ? navigate(`/query-table/${table.id}`)
-                        : navigate(
-                            `/project/${table.projectId}/collection/${encodeURIComponent(table.collectionPath)}?tableId=${table.id}&mode=view${table.isCollectionGroup ? '&group=true' : ''}`
-                          )
+                      table.projectId === '__csv__'
+                        ? navigate(`/csv-table/${table.id}`)
+                        : table.projectId === '__query__'
+                          ? navigate(`/query-table/${table.id}`)
+                          : navigate(
+                              `/project/${table.projectId}/collection/${encodeURIComponent(table.collectionPath)}?tableId=${table.id}&mode=view${table.isCollectionGroup ? '&group=true' : ''}`
+                            )
                     }
                     className="bg-white dark:bg-gray-800 rounded-md border border-gray-200 dark:border-gray-700 p-4 hover:border-gray-300 dark:hover:border-gray-600 transition-colors group cursor-pointer"
                   >
@@ -706,6 +789,11 @@ export default function DashboardPage() {
                             <p className="text-xs text-gray-400 dark:text-gray-500 flex items-center gap-1">
                               <Terminal size={10} />
                               SQL Query
+                            </p>
+                          ) : table.projectId === '__csv__' ? (
+                            <p className="text-xs text-gray-400 dark:text-gray-500 flex items-center gap-1">
+                              <FileSpreadsheet size={10} />
+                              CSV Import
                             </p>
                           ) : (
                             <p className="text-xs text-gray-400 dark:text-gray-500 truncate">
@@ -767,6 +855,12 @@ export default function DashboardPage() {
                           SQL Editor
                         </button>
                       )}
+                      {table.projectId === '__csv__' && (
+                        <span className="text-[10px] text-gray-400 dark:text-gray-500 bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 rounded-md flex items-center gap-1">
+                          <FileSpreadsheet size={9} />
+                          CSV
+                        </span>
+                      )}
                     </div>
                   </div>
                 )
@@ -794,11 +888,13 @@ export default function DashboardPage() {
                         key={table.id}
                         className="group hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors cursor-pointer"
                         onClick={() =>
-                          table.projectId === '__query__'
-                            ? navigate(`/query-table/${table.id}`)
-                            : navigate(
-                                `/project/${table.projectId}/collection/${encodeURIComponent(table.collectionPath)}?tableId=${table.id}&mode=view${table.isCollectionGroup ? '&group=true' : ''}`
-                              )
+                          table.projectId === '__csv__'
+                            ? navigate(`/csv-table/${table.id}`)
+                            : table.projectId === '__query__'
+                              ? navigate(`/query-table/${table.id}`)
+                              : navigate(
+                                  `/project/${table.projectId}/collection/${encodeURIComponent(table.collectionPath)}?tableId=${table.id}&mode=view${table.isCollectionGroup ? '&group=true' : ''}`
+                                )
                         }
                       >
                         <td className="pl-3 py-3">
@@ -827,6 +923,11 @@ export default function DashboardPage() {
                               <span className="text-xs text-gray-400 dark:text-gray-500 flex items-center gap-1">
                                 <Terminal size={10} />
                                 SQL Query
+                              </span>
+                            ) : table.projectId === '__csv__' ? (
+                              <span className="text-xs text-gray-400 dark:text-gray-500 flex items-center gap-1">
+                                <FileSpreadsheet size={10} />
+                                CSV Import
                               </span>
                             ) : (
                               <span className="text-xs text-gray-500 dark:text-gray-400">
