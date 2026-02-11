@@ -57,6 +57,7 @@ import {
   Percent,
   Calendar,
   CaseSensitive,
+  MousePointer2,
 } from 'lucide-react'
 import {
   BarChart,
@@ -1448,6 +1449,7 @@ export default function DashboardCreatorPage() {
                       isDrag && 'z-50 opacity-95 shadow-lg',
                       isRsz && 'z-50',
                       isDragging && !isDrag && !isRsz && 'opacity-50',
+                      editMode && configuringWidgetId === widget.i && !isDrag && !isRsz && 'ring-2 ring-gray-400 ring-offset-1 rounded-md',
                     )}
                     style={{
                       left,
@@ -1456,6 +1458,9 @@ export default function DashboardCreatorPage() {
                       height,
                       transition: (isDrag || isRsz || isDragging) ? 'none' : 'left 150ms ease, top 150ms ease, width 150ms ease, height 150ms ease',
                       willChange: (isDrag || isRsz) ? 'left, top, width, height' : undefined,
+                    }}
+                    onClick={() => {
+                      if (editMode) setConfiguringWidgetId(widget.i)
                     }}
                     onMouseDown={(e) => {
                       if (!editMode) return
@@ -1509,78 +1514,96 @@ export default function DashboardCreatorPage() {
         </div>
       </main>
 
-      {/* Right side config panel */}
+      {/* Right side config panel — always visible in edit mode */}
       <AnimatePresence>
-        {configuringWidgetId && (() => {
-          const cWidget = widgets.find((w) => w.i === configuringWidgetId)
-          if (!cWidget) return null
-          // All widget types now have config panels
-          const hasConfigPanel = ['table', 'metric', 'chart', 'heading', 'text', 'pivot'].includes(cWidget.type) || !cWidget.type
-          if (!hasConfigPanel) return null
-          return (
-            <motion.aside
-              key="config-panel"
-              initial={{ width: 0, opacity: 0 }}
-              animate={{ width: 340, opacity: 1 }}
-              exit={{ width: 0, opacity: 0 }}
-              transition={{ duration: 0.25, ease: [0.04, 0.62, 0.23, 0.98] }}
-              className="bg-white border-l border-gray-200 shrink-0 overflow-hidden h-full"
-            >
-              <div className="w-[340px] h-full">
-                {(cWidget.type === 'table' || !cWidget.type) ? (
-                  <TableConfigPanel
-                    key={configuringWidgetId}
-                    widget={cWidget}
-                    table={getTableForWidget(cWidget.tableId)}
-                    onHiddenColumnsChange={(cols) => updateWidgetHiddenColumns(cWidget.i, cols)}
-                    onColumnAliasChange={(sp, alias) => updateWidgetColumnAlias(cWidget.i, sp, alias)}
-                    onColumnOrderChange={(order) => updateWidgetColumnOrder(cWidget.i, order)}
-                    onConditionalFormatsChange={(rules) => updateWidgetConditionalFormats(cWidget.i, rules)}
-                    onColumnFormatsChange={(formats) => updateWidgetColumnFormats(cWidget.i, formats)}
-                    onClose={() => setConfiguringWidgetId(null)}
-                  />
-                ) : cWidget.type === 'metric' ? (
-                  <MetricConfigPanel
-                    key={configuringWidgetId}
-                    widget={cWidget}
-                    savedTables={savedTables}
-                    onApply={(config) => {
-                      updateWidgetMetricConfig(cWidget.i, config)
-                    }}
-                    onClose={() => setConfiguringWidgetId(null)}
-                  />
-                ) : cWidget.type === 'chart' ? (
-                  <ChartConfigPanel
-                    key={configuringWidgetId}
-                    widget={cWidget}
-                    savedTables={savedTables}
-                    onApply={(config) => {
-                      updateWidgetChartConfig(cWidget.i, config)
-                    }}
-                    onClose={() => setConfiguringWidgetId(null)}
-                  />
-                ) : (cWidget.type === 'heading' || cWidget.type === 'text') ? (
-                  <ElementConfigPanel
-                    key={configuringWidgetId}
-                    widget={cWidget}
-                    onApply={(config) => updateWidgetElementConfig(cWidget.i, config)}
-                    onClose={() => setConfiguringWidgetId(null)}
-                  />
-                ) : cWidget.type === 'pivot' ? (
-                  <PivotConfigPanel
-                    key={configuringWidgetId}
-                    widget={cWidget}
-                    savedTables={savedTables}
-                    onApply={(config) => updateWidgetPivotConfig(cWidget.i, config)}
-                    onConditionalFormatsChange={(rules) => updateWidgetConditionalFormats(cWidget.i, rules)}
-                    onColumnFormatsChange={(formats) => updateWidgetColumnFormats(cWidget.i, formats)}
-                    onClose={() => setConfiguringWidgetId(null)}
-                  />
-                ) : null}
-              </div>
-            </motion.aside>
-          )
-        })()}
+        {editMode && (
+          <motion.aside
+            key="config-panel"
+            initial={{ width: 0, opacity: 0 }}
+            animate={{ width: 340, opacity: 1 }}
+            exit={{ width: 0, opacity: 0 }}
+            transition={{ duration: 0.25, ease: [0.04, 0.62, 0.23, 0.98] }}
+            className="bg-white border-l border-gray-200 shrink-0 overflow-hidden h-full"
+          >
+            <div className="w-[340px] h-full">
+              {(() => {
+                const cWidget = configuringWidgetId ? widgets.find((w) => w.i === configuringWidgetId) : null
+                if (!cWidget) {
+                  return (
+                    <div className="h-full flex flex-col items-center justify-center text-center px-8">
+                      <div className="w-12 h-12 bg-gray-50 rounded-md flex items-center justify-center mb-3">
+                        <MousePointer2 size={20} className="text-gray-300" />
+                      </div>
+                      <p className="text-sm font-medium text-gray-500">No element selected</p>
+                      <p className="text-xs text-gray-400 mt-1">Click on any element in the dashboard to configure it</p>
+                    </div>
+                  )
+                }
+                if (cWidget.type === 'table' || !cWidget.type) {
+                  return (
+                    <TableConfigPanel
+                      key={configuringWidgetId}
+                      widget={cWidget}
+                      table={getTableForWidget(cWidget.tableId)}
+                      onHiddenColumnsChange={(cols) => updateWidgetHiddenColumns(cWidget.i, cols)}
+                      onColumnAliasChange={(sp, alias) => updateWidgetColumnAlias(cWidget.i, sp, alias)}
+                      onColumnOrderChange={(order) => updateWidgetColumnOrder(cWidget.i, order)}
+                      onConditionalFormatsChange={(rules) => updateWidgetConditionalFormats(cWidget.i, rules)}
+                      onColumnFormatsChange={(formats) => updateWidgetColumnFormats(cWidget.i, formats)}
+                      onClose={() => setConfiguringWidgetId(null)}
+                    />
+                  )
+                }
+                if (cWidget.type === 'metric') {
+                  return (
+                    <MetricConfigPanel
+                      key={configuringWidgetId}
+                      widget={cWidget}
+                      savedTables={savedTables}
+                      onApply={(config) => updateWidgetMetricConfig(cWidget.i, config)}
+                      onClose={() => setConfiguringWidgetId(null)}
+                    />
+                  )
+                }
+                if (cWidget.type === 'chart') {
+                  return (
+                    <ChartConfigPanel
+                      key={configuringWidgetId}
+                      widget={cWidget}
+                      savedTables={savedTables}
+                      onApply={(config) => updateWidgetChartConfig(cWidget.i, config)}
+                      onClose={() => setConfiguringWidgetId(null)}
+                    />
+                  )
+                }
+                if (cWidget.type === 'heading' || cWidget.type === 'text') {
+                  return (
+                    <ElementConfigPanel
+                      key={configuringWidgetId}
+                      widget={cWidget}
+                      onApply={(config) => updateWidgetElementConfig(cWidget.i, config)}
+                      onClose={() => setConfiguringWidgetId(null)}
+                    />
+                  )
+                }
+                if (cWidget.type === 'pivot') {
+                  return (
+                    <PivotConfigPanel
+                      key={configuringWidgetId}
+                      widget={cWidget}
+                      savedTables={savedTables}
+                      onApply={(config) => updateWidgetPivotConfig(cWidget.i, config)}
+                      onConditionalFormatsChange={(rules) => updateWidgetConditionalFormats(cWidget.i, rules)}
+                      onColumnFormatsChange={(formats) => updateWidgetColumnFormats(cWidget.i, formats)}
+                      onClose={() => setConfiguringWidgetId(null)}
+                    />
+                  )
+                }
+                return null
+              })()}
+            </div>
+          </motion.aside>
+        )}
       </AnimatePresence>
       </div>
 
@@ -5477,6 +5500,23 @@ function ElementConfigPanel({
 
 /* ───────── Config Panel: Pivot Table ───────── */
 
+/** Guess the column data type from the source path name. */
+function guessColType(name: string): 'number' | 'date' | 'text' {
+  const lower = name.toLowerCase()
+  if (/\b(date|time|created|updated|timestamp)\b/.test(lower)) return 'date'
+  if (/\b(count|amount|price|qty|total|sum|revenue|cost|distance|number|nr|num|id|min|max)\b/.test(lower)) return 'number'
+  return 'text'
+}
+
+function ColTypeIcon({ name, className }: { name: string; className?: string }) {
+  const t = guessColType(name)
+  if (t === 'number') return <span className={cn('text-[9px] font-bold text-gray-400 tabular-nums', className)}>123</span>
+  if (t === 'date') return <Calendar size={11} className={cn('text-gray-400', className)} />
+  return <span className={cn('text-[9px] font-semibold text-gray-400', className)}>ABC</span>
+}
+
+type PivotPanelTab = 'properties' | 'format'
+
 function PivotConfigPanel({
   widget,
   savedTables,
@@ -5497,9 +5537,19 @@ function PivotConfigPanel({
   const [draftRowCols, setDraftRowCols] = useState<string[]>(config?.rowColumns ?? [])
   const [draftColCols, setDraftColCols] = useState<string[]>(config?.colColumns ?? [])
   const [draftValues, setDraftValues] = useState<PivotValueConfig[]>(config?.values ?? [])
+  const [activeTab, setActiveTab] = useState<PivotPanelTab>('properties')
+  const [colSearch, setColSearch] = useState('')
+  const [showColPicker, setShowColPicker] = useState<'row' | 'col' | null>(null)
+  const [showValuePicker, setShowValuePicker] = useState(false)
 
   const draftTable = savedTables.find((t) => t.id === draftTableId)
   const draftColumns = draftTable?.columns.filter((c) => c.visible) ?? []
+
+  // Filter columns by search
+  const filteredColumns = draftColumns.filter((c) => {
+    const label = c.alias || c.sourcePath
+    return label.toLowerCase().includes(colSearch.toLowerCase())
+  })
 
   // Auto-apply on every change
   useEffect(() => {
@@ -5514,8 +5564,9 @@ function PivotConfigPanel({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draftTableId, draftRowCols, draftColCols, draftValues])
 
-  const addValue = () => {
-    setDraftValues((prev) => [...prev, { id: `pv-${Date.now()}`, column: '', aggregation: 'sum' }])
+  const addValue = (column: string) => {
+    setDraftValues((prev) => [...prev, { id: `pv-${Date.now()}`, column, aggregation: 'count' }])
+    setShowValuePicker(false)
   }
 
   const updateValue = (id: string, patch: Partial<PivotValueConfig>) => {
@@ -5526,190 +5577,340 @@ function PivotConfigPanel({
     setDraftValues((prev) => prev.filter((v) => v.id !== id))
   }
 
-  const toggleCol = (list: string[], setList: (v: string[]) => void, col: string) => {
-    if (list.includes(col)) {
-      setList(list.filter((c) => c !== col))
-    } else {
-      setList([...list, col])
-    }
+  const addToList = (list: string[], setList: (v: string[]) => void, col: string) => {
+    if (!list.includes(col)) setList([...list, col])
+    setShowColPicker(null)
   }
 
-  const inputCls = 'w-full mt-0.5 text-xs border border-gray-200 rounded-md px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-gray-300 focus:border-gray-300 bg-white'
+  const removeFromList = (list: string[], setList: (v: string[]) => void, col: string) => {
+    setList(list.filter((c) => c !== col))
+  }
+
+  // Column picker dropdown
+  const renderColPicker = (target: 'row' | 'col') => {
+    const currentList = target === 'row' ? draftRowCols : draftColCols
+    const setList = target === 'row' ? setDraftRowCols : setDraftColCols
+    const available = draftColumns.filter((c) => !currentList.includes(c.sourcePath))
+    if (available.length === 0) return null
+    return (
+      <div className="border border-gray-200 rounded-md bg-white shadow-sm mt-1 max-h-40 overflow-auto">
+        {available.map((c) => {
+          const label = c.alias || c.sourcePath
+          return (
+            <button
+              key={c.id}
+              onClick={() => addToList(currentList, setList, c.sourcePath)}
+              className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-gray-600 hover:bg-gray-50 transition-colors cursor-pointer"
+            >
+              <ColTypeIcon name={c.sourcePath} />
+              <span className="truncate">{label}</span>
+            </button>
+          )
+        })}
+      </div>
+    )
+  }
+
+  // Value picker dropdown
+  const renderValuePicker = () => {
+    return (
+      <div className="border border-gray-200 rounded-md bg-white shadow-sm mt-1 max-h-40 overflow-auto">
+        {draftColumns.map((c) => {
+          const label = c.alias || c.sourcePath
+          return (
+            <button
+              key={c.id}
+              onClick={() => addValue(c.sourcePath)}
+              className="w-full flex items-center gap-2 px-2.5 py-1.5 text-xs text-gray-600 hover:bg-gray-50 transition-colors cursor-pointer"
+            >
+              <ColTypeIcon name={c.sourcePath} />
+              <span className="truncate">{label}</span>
+            </button>
+          )
+        })}
+      </div>
+    )
+  }
 
   return (
     <div className="h-full flex flex-col">
+      {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 shrink-0">
         <div className="flex items-center gap-2">
           <Grid3X3 size={14} className="text-gray-400" />
-          <h3 className="text-sm font-semibold text-gray-900">Configure Pivot Table</h3>
+          <h3 className="text-sm font-semibold text-gray-900">Pivot Table</h3>
         </div>
         <button onClick={onClose} className="p-1 text-gray-400 hover:text-gray-600 transition-colors rounded-md hover:bg-gray-100 cursor-pointer">
           <X size={14} />
         </button>
       </div>
 
-      <div className="flex-1 overflow-auto p-4 space-y-4">
-        {/* Data Source */}
-        <div>
-          <label className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Data Source</label>
-          <select
-            value={draftTableId}
-            onChange={(e) => { setDraftTableId(e.target.value); setDraftRowCols([]); setDraftColCols([]); setDraftValues([]) }}
-            className={inputCls}
-          >
-            <option value="">Select a table…</option>
-            {savedTables.map((t) => (<option key={t.id} value={t.id}>{t.tableName}</option>))}
-          </select>
+      {/* Tabs: Properties | Format */}
+      <div className="px-4 pt-2 pb-0 border-b border-gray-200 shrink-0">
+        <div className="flex items-center gap-0">
+          {(['properties', 'format'] as PivotPanelTab[]).map((tab) => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              className={cn(
+                'px-3 py-2 text-xs font-medium border-b-2 transition-colors cursor-pointer capitalize',
+                activeTab === tab
+                  ? 'text-gray-900 border-gray-900'
+                  : 'text-gray-400 border-transparent hover:text-gray-600'
+              )}
+            >
+              {tab}
+            </button>
+          ))}
         </div>
-
-        {draftTableId && (
-          <>
-            {/* Row Fields */}
-            <div>
-              <label className="text-[10px] font-medium text-gray-500 uppercase tracking-wider flex items-center gap-1">
-                <Rows3 size={10} />
-                Row Fields
-              </label>
-              <p className="text-[9px] text-gray-400 mb-1.5">Group rows by these columns</p>
-              <div className="space-y-1 max-h-32 overflow-auto">
-                {draftColumns.map((c) => {
-                  const isActive = draftRowCols.includes(c.sourcePath)
-                  return (
-                    <button
-                      key={c.id}
-                      onClick={() => toggleCol(draftRowCols, setDraftRowCols, c.sourcePath)}
-                      className={cn(
-                        'w-full flex items-center gap-2 px-2 py-1.5 text-xs rounded-md transition-colors cursor-pointer',
-                        isActive ? 'bg-gray-100 text-gray-900 font-medium' : 'text-gray-600 hover:bg-gray-50'
-                      )}
-                    >
-                      <div className={cn(
-                        'w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 transition-colors',
-                        isActive ? 'bg-gray-700 border-gray-700' : 'border-gray-300'
-                      )}>
-                        {isActive && <Check size={8} className="text-white" />}
-                      </div>
-                      <span className="truncate">{c.alias || c.sourcePath}</span>
-                    </button>
-                  )
-                })}
-              </div>
-            </div>
-
-            {/* Column Fields */}
-            <div>
-              <label className="text-[10px] font-medium text-gray-500 uppercase tracking-wider flex items-center gap-1">
-                <Columns3 size={10} />
-                Column Fields
-              </label>
-              <p className="text-[9px] text-gray-400 mb-1.5">Pivot columns by these fields</p>
-              <div className="space-y-1 max-h-32 overflow-auto">
-                {draftColumns.map((c) => {
-                  const isActive = draftColCols.includes(c.sourcePath)
-                  return (
-                    <button
-                      key={c.id}
-                      onClick={() => toggleCol(draftColCols, setDraftColCols, c.sourcePath)}
-                      className={cn(
-                        'w-full flex items-center gap-2 px-2 py-1.5 text-xs rounded-md transition-colors cursor-pointer',
-                        isActive ? 'bg-gray-100 text-gray-900 font-medium' : 'text-gray-600 hover:bg-gray-50'
-                      )}
-                    >
-                      <div className={cn(
-                        'w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 transition-colors',
-                        isActive ? 'bg-gray-700 border-gray-700' : 'border-gray-300'
-                      )}>
-                        {isActive && <Check size={8} className="text-white" />}
-                      </div>
-                      <span className="truncate">{c.alias || c.sourcePath}</span>
-                    </button>
-                  )
-                })}
-              </div>
-            </div>
-
-            {/* Values */}
-            <div>
-              <label className="text-[10px] font-medium text-gray-500 uppercase tracking-wider flex items-center gap-1">
-                <Calculator size={10} />
-                Values (Aggregations)
-              </label>
-              <p className="text-[9px] text-gray-400 mb-1.5">Computed values in the pivot cells</p>
-              <div className="space-y-2">
-                {draftValues.map((v) => (
-                  <div key={v.id} className="flex items-start gap-1.5 bg-gray-50 rounded-md p-2">
-                    <div className="flex-1 space-y-1">
-                      <select
-                        value={v.column}
-                        onChange={(e) => updateValue(v.id, { column: e.target.value })}
-                        className="w-full text-[10px] border border-gray-200 rounded-md px-2 py-1 text-gray-700 bg-white focus:outline-none focus:border-gray-400"
-                      >
-                        <option value="">Select column…</option>
-                        {draftColumns.map((c) => (
-                          <option key={c.id} value={c.sourcePath}>{c.alias || c.sourcePath}</option>
-                        ))}
-                      </select>
-                      <select
-                        value={v.aggregation}
-                        onChange={(e) => updateValue(v.id, { aggregation: e.target.value as AggregationType })}
-                        className="w-full text-[10px] border border-gray-200 rounded-md px-2 py-1 text-gray-700 bg-white focus:outline-none focus:border-gray-400"
-                      >
-                        {Object.entries(AGGREGATION_LABELS).map(([k, lab]) => (
-                          <option key={k} value={k}>{lab}</option>
-                        ))}
-                      </select>
-                      <input
-                        type="text"
-                        value={v.label ?? ''}
-                        onChange={(e) => updateValue(v.id, { label: e.target.value })}
-                        placeholder="Label (optional)"
-                        className="w-full text-[10px] border border-gray-200 rounded-md px-2 py-1 text-gray-700 bg-white focus:outline-none focus:border-gray-400 placeholder:text-gray-300"
-                      />
-                    </div>
-                    <button
-                      onClick={() => removeValue(v.id)}
-                      className="mt-0.5 p-1 text-gray-300 hover:text-red-500 transition-colors rounded-md hover:bg-white cursor-pointer shrink-0"
-                    >
-                      <Trash2 size={11} />
-                    </button>
-                  </div>
-                ))}
-              </div>
-              <button
-                onClick={addValue}
-                className="w-full flex items-center justify-center gap-1 text-[10px] font-medium text-gray-500 hover:text-gray-700 hover:bg-gray-50 rounded-md py-2 mt-2 transition-colors cursor-pointer border border-dashed border-gray-200"
-              >
-                <Plus size={10} />
-                Add value
-              </button>
-            </div>
-          </>
-        )}
-
-        {/* Column Formatting */}
-        {draftTableId && (
-          <ColumnFormattingSection
-            columns={[
-              ...draftRowCols.map((c) => ({ key: c, label: c })),
-              ...draftValues.map((v) => ({ key: v.column || v.id, label: v.label || `${AGGREGATION_LABELS[v.aggregation]}${v.column ? ` of ${v.column}` : ''}` })),
-            ]}
-            columnFormats={widget.columnFormats ?? {}}
-            onChange={onColumnFormatsChange}
-          />
-        )}
-
-        {/* Conditional Formatting */}
-        {draftTableId && (
-          <ConditionalFormattingSection
-            rules={widget.conditionalFormats ?? []}
-            columns={[
-              ...draftRowCols.map((c) => ({ key: c, label: c })),
-              ...draftValues.map((v) => ({ key: v.column || v.id, label: v.label || `${AGGREGATION_LABELS[v.aggregation]}${v.column ? ` of ${v.column}` : ''}` })),
-            ]}
-            onChange={onConditionalFormatsChange}
-          />
-        )}
       </div>
+
+      {/* Tab content */}
+      {activeTab === 'properties' ? (
+        <div className="flex-1 flex flex-col min-h-0">
+          {/* Top: config sections */}
+          <div className="flex-1 overflow-auto">
+            <div className="p-4 space-y-4">
+              {/* Data Source */}
+              <div>
+                <label className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Data Source</label>
+                <select
+                  value={draftTableId}
+                  onChange={(e) => { setDraftTableId(e.target.value); setDraftRowCols([]); setDraftColCols([]); setDraftValues([]) }}
+                  className="w-full mt-1 text-xs border border-gray-200 rounded-md px-2.5 py-2 focus:outline-none focus:border-gray-400 bg-white text-gray-700"
+                >
+                  <option value="">Select a table…</option>
+                  {savedTables.map((t) => (<option key={t.id} value={t.id}>{t.tableName}</option>))}
+                </select>
+              </div>
+
+              {draftTableId && (
+                <>
+                  {/* Pivot Rows */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider flex items-center gap-1.5">
+                        <Rows3 size={11} className="text-gray-400" />
+                        Pivot Rows
+                      </label>
+                      <button
+                        onClick={() => setShowColPicker(showColPicker === 'row' ? null : 'row')}
+                        className="p-0.5 text-gray-400 hover:text-gray-600 transition-colors rounded cursor-pointer"
+                        title="Add row field"
+                      >
+                        <Plus size={12} />
+                      </button>
+                    </div>
+                    {draftRowCols.length > 0 ? (
+                      <div className="space-y-0.5">
+                        {draftRowCols.map((col) => (
+                          <div key={col} className="flex items-center gap-2 px-2.5 py-1.5 rounded-md hover:bg-gray-50 group/item transition-colors">
+                            <ColTypeIcon name={col} />
+                            <span className="text-xs text-gray-700 flex-1 truncate">{col}</span>
+                            <button
+                              onClick={() => removeFromList(draftRowCols, setDraftRowCols, col)}
+                              className="p-0.5 text-gray-300 hover:text-red-500 transition-colors opacity-0 group-hover/item:opacity-100 cursor-pointer"
+                            >
+                              <X size={10} />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-[10px] text-gray-400 italic px-1">No row fields added</p>
+                    )}
+                    {showColPicker === 'row' && renderColPicker('row')}
+                  </div>
+
+                  {/* Pivot Columns */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider flex items-center gap-1.5">
+                        <Columns3 size={11} className="text-gray-400" />
+                        Pivot Columns
+                      </label>
+                      <button
+                        onClick={() => setShowColPicker(showColPicker === 'col' ? null : 'col')}
+                        className="p-0.5 text-gray-400 hover:text-gray-600 transition-colors rounded cursor-pointer"
+                        title="Add column field"
+                      >
+                        <Plus size={12} />
+                      </button>
+                    </div>
+                    {draftColCols.length > 0 ? (
+                      <div className="space-y-0.5">
+                        {draftColCols.map((col) => (
+                          <div key={col} className="flex items-center gap-2 px-2.5 py-1.5 rounded-md hover:bg-gray-50 group/item transition-colors">
+                            <ColTypeIcon name={col} />
+                            <span className="text-xs text-gray-700 flex-1 truncate">{col}</span>
+                            <button
+                              onClick={() => removeFromList(draftColCols, setDraftColCols, col)}
+                              className="p-0.5 text-gray-300 hover:text-red-500 transition-colors opacity-0 group-hover/item:opacity-100 cursor-pointer"
+                            >
+                              <X size={10} />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-[10px] text-gray-400 italic px-1">No column fields added</p>
+                    )}
+                    {showColPicker === 'col' && renderColPicker('col')}
+                  </div>
+
+                  {/* Divider */}
+                  <div className="border-t border-gray-100" />
+
+                  {/* Values */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider flex items-center gap-1.5">
+                        <Calculator size={11} className="text-gray-400" />
+                        Values
+                      </label>
+                      <button
+                        onClick={() => setShowValuePicker(!showValuePicker)}
+                        className="p-0.5 text-gray-400 hover:text-gray-600 transition-colors rounded cursor-pointer"
+                        title="Add value"
+                      >
+                        <Plus size={12} />
+                      </button>
+                    </div>
+                    {draftValues.length > 0 ? (
+                      <div className="space-y-1.5">
+                        {draftValues.map((v) => {
+                          const label = v.label || `${AGGREGATION_LABELS[v.aggregation]} of ${v.column || '…'}`
+                          return (
+                            <div key={v.id} className="bg-gray-50 rounded-md p-2 group/val">
+                              <div className="flex items-center gap-2 mb-1.5">
+                                <ColTypeIcon name={v.column || 'count'} />
+                                <span className="text-xs text-gray-700 font-medium flex-1 truncate">{label}</span>
+                                <button
+                                  onClick={() => removeValue(v.id)}
+                                  className="p-0.5 text-gray-300 hover:text-red-500 transition-colors opacity-0 group-hover/val:opacity-100 cursor-pointer shrink-0"
+                                >
+                                  <X size={10} />
+                                </button>
+                              </div>
+                              <div className="flex gap-1.5">
+                                <select
+                                  value={v.column}
+                                  onChange={(e) => updateValue(v.id, { column: e.target.value })}
+                                  className="flex-1 text-[10px] border border-gray-200 rounded px-1.5 py-1 text-gray-600 bg-white focus:outline-none focus:border-gray-400"
+                                >
+                                  <option value="">Column…</option>
+                                  {draftColumns.map((c) => (
+                                    <option key={c.id} value={c.sourcePath}>{c.alias || c.sourcePath}</option>
+                                  ))}
+                                </select>
+                                <select
+                                  value={v.aggregation}
+                                  onChange={(e) => updateValue(v.id, { aggregation: e.target.value as AggregationType })}
+                                  className="flex-1 text-[10px] border border-gray-200 rounded px-1.5 py-1 text-gray-600 bg-white focus:outline-none focus:border-gray-400"
+                                >
+                                  {Object.entries(AGGREGATION_LABELS).map(([k, lab]) => (
+                                    <option key={k} value={k}>{lab}</option>
+                                  ))}
+                                </select>
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    ) : (
+                      <p className="text-[10px] text-gray-400 italic px-1">Drag from Columns below</p>
+                    )}
+                    {showValuePicker && renderValuePicker()}
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Available Columns */}
+            {draftTableId && (
+              <div className="border-t border-gray-200">
+                <div className="px-4 pt-3 pb-2">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Columns</span>
+                    <div className="flex items-center gap-1">
+                      <Search size={11} className="text-gray-400" />
+                    </div>
+                  </div>
+                  <input
+                    type="text"
+                    value={colSearch}
+                    onChange={(e) => setColSearch(e.target.value)}
+                    placeholder="Search columns…"
+                    className="w-full text-[10px] border border-gray-200 rounded-md px-2 py-1.5 text-gray-600 bg-white focus:outline-none focus:border-gray-400 placeholder:text-gray-300 mb-2"
+                  />
+                </div>
+                <div className="px-2 pb-3 max-h-[240px] overflow-auto">
+                  {filteredColumns.map((c) => {
+                    const label = c.alias || c.sourcePath
+                    const isInRow = draftRowCols.includes(c.sourcePath)
+                    const isInCol = draftColCols.includes(c.sourcePath)
+                    const isInVal = draftValues.some((v) => v.column === c.sourcePath)
+                    const isUsed = isInRow || isInCol || isInVal
+                    return (
+                      <div
+                        key={c.id}
+                        className={cn(
+                          'flex items-center gap-2 px-2.5 py-1.5 rounded-md transition-colors',
+                          isUsed ? 'opacity-50' : 'hover:bg-gray-50 cursor-pointer'
+                        )}
+                        onClick={() => {
+                          if (isUsed) return
+                          // Default: add as a value (count)
+                          addValue(c.sourcePath)
+                        }}
+                      >
+                        <ColTypeIcon name={c.sourcePath} />
+                        <span className="text-xs text-gray-700 flex-1 truncate">{label}</span>
+                        {isInRow && <span className="text-[8px] text-gray-400 uppercase">Row</span>}
+                        {isInCol && <span className="text-[8px] text-gray-400 uppercase">Col</span>}
+                        {isInVal && <span className="text-[8px] text-gray-400 uppercase">Val</span>}
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      ) : (
+        /* Format tab */
+        <div className="flex-1 overflow-auto p-4 space-y-4">
+          {/* Column Formatting */}
+          {draftTableId && (
+            <ColumnFormattingSection
+              columns={[
+                ...draftRowCols.map((c) => ({ key: c, label: c })),
+                ...draftValues.map((v) => ({ key: v.column || v.id, label: v.label || `${AGGREGATION_LABELS[v.aggregation]}${v.column ? ` of ${v.column}` : ''}` })),
+              ]}
+              columnFormats={widget.columnFormats ?? {}}
+              onChange={onColumnFormatsChange}
+            />
+          )}
+
+          {/* Conditional Formatting */}
+          {draftTableId && (
+            <ConditionalFormattingSection
+              rules={widget.conditionalFormats ?? []}
+              columns={[
+                ...draftRowCols.map((c) => ({ key: c, label: c })),
+                ...draftValues.map((v) => ({ key: v.column || v.id, label: v.label || `${AGGREGATION_LABELS[v.aggregation]}${v.column ? ` of ${v.column}` : ''}` })),
+              ]}
+              onChange={onConditionalFormatsChange}
+            />
+          )}
+
+          {!draftTableId && (
+            <div className="flex flex-col items-center justify-center py-12 text-center">
+              <p className="text-xs text-gray-400">Select a data source first</p>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -5927,12 +6128,11 @@ function PivotCard({
     <div className="h-full flex flex-col bg-white rounded-md border border-gray-200 overflow-hidden relative group/el">
       {/* Header — drag handle */}
       <div className={cn(
-        'widget-drag-handle flex items-center justify-between px-3 py-2 border-b border-gray-100 bg-gray-50/50 shrink-0 select-none',
+        'widget-drag-handle flex items-center justify-between px-4 py-2.5 border-b border-gray-100 shrink-0 select-none',
         editMode ? 'cursor-grab active:cursor-grabbing' : 'cursor-default'
       )}>
         <div className="flex items-center gap-2 min-w-0">
           {editMode && <GripVertical size={14} className="text-gray-300 shrink-0" />}
-          <Grid3X3 size={13} className="text-gray-400 shrink-0" />
           {editingTitle && editMode ? (
             <input
               ref={titleInputRef}
@@ -5945,11 +6145,11 @@ function PivotCard({
                 if (e.key === 'Escape') setEditingTitle(false)
               }}
               onMouseDown={(e) => e.stopPropagation()}
-              className="w-full text-xs font-medium text-gray-900 bg-transparent border-b border-gray-300 focus:border-gray-500 focus:outline-none py-0"
+              className="w-full text-sm font-semibold text-gray-900 bg-transparent border-b border-gray-300 focus:border-gray-500 focus:outline-none py-0"
             />
           ) : (
             <h4
-              className={cn('text-xs font-medium text-gray-700 truncate', editMode && 'cursor-text')}
+              className={cn('text-sm font-semibold text-gray-900 truncate', editMode && 'cursor-text')}
               onDoubleClick={() => {
                 if (!editMode) return
                 setDraftTitle(displayTitle)
@@ -5959,14 +6159,13 @@ function PivotCard({
               {displayTitle}
             </h4>
           )}
-          {table && !editingTitle && <span className="text-[10px] text-gray-400 truncate">— {table.tableName}</span>}
         </div>
-        <div className="flex items-center gap-1 shrink-0" onMouseDown={(e) => e.stopPropagation()}>
-          <button onClick={onOpenConfig} className="p-1 text-gray-300 hover:text-gray-600 transition-colors rounded-md hover:bg-gray-100 cursor-pointer" title="Configure"><Settings2 size={12} /></button>
+        <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover/el:opacity-100 transition-opacity" onMouseDown={(e) => e.stopPropagation()}>
+          <button onClick={onOpenConfig} className="p-1 text-gray-400 hover:text-gray-600 transition-colors rounded-md hover:bg-gray-100 cursor-pointer" title="Configure"><Settings2 size={13} /></button>
           {editMode && (
             <>
-              <button onClick={onDuplicate} className="p-1 text-gray-300 hover:text-gray-600 transition-colors rounded-md hover:bg-gray-100 cursor-pointer" title="Duplicate"><Copy size={12} /></button>
-              <button onClick={onRemove} className="p-1 text-gray-300 hover:text-red-500 transition-colors rounded-md hover:bg-gray-100 cursor-pointer" title="Remove"><Trash2 size={12} /></button>
+              <button onClick={onDuplicate} className="p-1 text-gray-400 hover:text-gray-600 transition-colors rounded-md hover:bg-gray-100 cursor-pointer" title="Duplicate"><Copy size={13} /></button>
+              <button onClick={onRemove} className="p-1 text-gray-400 hover:text-red-500 transition-colors rounded-md hover:bg-gray-100 cursor-pointer" title="Remove"><Trash2 size={13} /></button>
             </>
           )}
         </div>
@@ -5998,12 +6197,12 @@ function PivotCard({
               })}
             </colgroup>
             <thead>
-              <tr className="bg-gray-50">
+              <tr className="bg-gray-50/80">
                 {pivotData.rowHeaders.map((rh, ri) => (
                   <th
                     key={rh}
                     ref={(el) => { if (el) thRefs.current.set(ri, el); else thRefs.current.delete(ri) }}
-                    className="text-left px-2.5 py-2 text-[10px] font-semibold text-gray-500 border-b border-r border-gray-200 sticky top-0 bg-gray-50 relative select-none overflow-hidden text-ellipsis whitespace-nowrap group/th"
+                    className="text-left px-3 py-2.5 text-xs font-medium text-gray-600 border-b border-gray-200 sticky top-0 bg-gray-50/80 relative select-none overflow-hidden text-ellipsis whitespace-nowrap group/th"
                   >
                     <span className="inline-flex items-center gap-1">
                       {rh}
@@ -6049,7 +6248,7 @@ function PivotCard({
                     <th
                       key={i}
                       ref={(el) => { if (el) thRefs.current.set(ci, el); else thRefs.current.delete(ci) }}
-                      className="text-right px-2.5 py-2 text-[10px] font-semibold text-gray-500 border-b border-gray-200 sticky top-0 bg-gray-50 whitespace-nowrap relative select-none overflow-hidden text-ellipsis group/th"
+                      className="text-right px-3 py-2.5 text-xs font-medium text-gray-600 border-b border-gray-200 sticky top-0 bg-gray-50/80 whitespace-nowrap relative select-none overflow-hidden text-ellipsis group/th"
                     >
                       {editingColIdx === i && editMode ? (
                         <input
@@ -6145,7 +6344,7 @@ function PivotCard({
                     const colFmt = widget.columnFormats?.[rh]
                     const displayVal = colFmt ? applyColumnFormat(k, colFmt) : String(k ?? '—')
                     return (
-                    <td key={ki} className="px-2.5 py-1.5 text-gray-700 border-b border-r border-gray-100 font-medium whitespace-nowrap overflow-hidden text-ellipsis" style={cellStyle}>{displayVal}</td>
+                    <td key={ki} className="px-3 py-2 text-xs text-gray-800 border-b border-gray-100 font-medium whitespace-nowrap overflow-hidden text-ellipsis" style={cellStyle}>{displayVal}</td>
                     )
                   })}
                   {row.values.map((v, vi) => {
@@ -6156,7 +6355,7 @@ function PivotCard({
                     const colFmt = widget.columnFormats?.[colKey]
                     const displayVal = colFmt ? applyColumnFormat(v, colFmt) : (v != null ? (typeof v === 'number' ? v.toLocaleString(undefined, { maximumFractionDigits: 2 }) : String(v)) : '—')
                     return (
-                    <td key={vi} className="px-2.5 py-1.5 text-right text-gray-600 border-b border-gray-100 tabular-nums whitespace-nowrap overflow-hidden text-ellipsis" style={cellStyle}>
+                    <td key={vi} className="px-3 py-2 text-right text-xs text-gray-600 border-b border-gray-100 tabular-nums whitespace-nowrap overflow-hidden text-ellipsis" style={cellStyle}>
                       {displayVal}
                     </td>
                     )
