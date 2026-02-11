@@ -6465,7 +6465,7 @@ function PivotCard({
                   <th
                     key={rh}
                     ref={(el) => { if (el) thRefs.current.set(ri, el); else thRefs.current.delete(ri) }}
-                    className="text-left px-3 py-2.5 text-xs font-medium text-gray-600 border-b border-gray-200 sticky top-0 bg-gray-200/70 relative select-none overflow-hidden text-ellipsis whitespace-nowrap group/th cursor-pointer"
+                    className="text-left px-3 py-2.5 text-xs font-medium text-gray-600 border-b border-r border-gray-200 sticky top-0 bg-gray-200/70 relative select-none overflow-hidden text-ellipsis whitespace-nowrap group/th cursor-pointer"
                     onClick={() => { if (editMode) onColumnSelect(rh) }}
                   >
                     <span className="inline-flex items-center gap-1">
@@ -6514,7 +6514,7 @@ function PivotCard({
                     <th
                       key={i}
                       ref={(el) => { if (el) thRefs.current.set(ci, el); else thRefs.current.delete(ci) }}
-                      className="text-right px-3 py-2.5 text-xs font-medium text-gray-600 border-b border-gray-200 sticky top-0 bg-gray-50/80 whitespace-nowrap relative select-none overflow-hidden text-ellipsis group/th cursor-pointer"
+                      className="text-right px-3 py-2.5 text-xs font-medium text-gray-600 border-b border-r border-gray-200 sticky top-0 bg-gray-50/80 whitespace-nowrap relative select-none overflow-hidden text-ellipsis group/th cursor-pointer"
                       onClick={() => {
                         if (!editMode) return
                         const vc = config?.values[i % (config?.values.length || 1)]
@@ -6618,7 +6618,7 @@ function PivotCard({
                     const colFmt = widget.columnFormats?.[rh]
                     const displayVal = colFmt ? applyColumnFormat(k, colFmt) : String(k ?? '—')
                     return (
-                    <td key={ki} className="px-3 py-2 text-xs text-gray-800 border-b border-gray-100 font-medium whitespace-nowrap overflow-hidden text-ellipsis bg-gray-100" style={cellStyle}>{displayVal}</td>
+                    <td key={ki} className="px-3 py-2 text-xs text-gray-800 border-b border-r border-gray-200 font-medium whitespace-nowrap overflow-hidden text-ellipsis bg-gray-100" style={cellStyle}>{displayVal}</td>
                     )
                   })}
                   {row.values.map((v, vi) => {
@@ -6629,7 +6629,7 @@ function PivotCard({
                     const colFmt = widget.columnFormats?.[colKey]
                     const displayVal = colFmt ? applyColumnFormat(v, colFmt) : (v != null ? (typeof v === 'number' ? v.toLocaleString(undefined, { maximumFractionDigits: 2 }) : String(v)) : '—')
                     return (
-                    <td key={vi} className="px-3 py-2 text-right text-xs text-gray-600 border-b border-gray-100 tabular-nums whitespace-nowrap overflow-hidden text-ellipsis" style={cellStyle}>
+                    <td key={vi} className="px-3 py-2 text-right text-xs text-gray-600 border-b border-r border-gray-200 tabular-nums whitespace-nowrap overflow-hidden text-ellipsis" style={cellStyle}>
                       {displayVal}
                     </td>
                     )
