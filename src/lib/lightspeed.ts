@@ -323,7 +323,9 @@ export async function syncSales(
   const conn = await getLightspeedConnection(uid)
   const lastSync = conn?.lastSalesSync
 
-  let allSales: LightspeedSale[] = []
+  let totalSynced = 0
+  const BATCH_LIMIT = 1000 // Fetch 1000, store, then continue
+  let buffer: LightspeedSale[] = []
 
   // Build initial URL with relations
   let nextUrl: string | null =
@@ -353,14 +355,21 @@ export async function syncSales(
 
       const salesArray = Array.isArray(rawSales) ? rawSales : [rawSales]
       const parsed = salesArray.map((s) => parseSaleFromApi(s as Record<string, unknown>))
-      allSales = allSales.concat(parsed)
+      buffer = buffer.concat(parsed)
 
-      onProgress?.(`Fetched ${allSales.length} sales...`)
+      onProgress?.(`Fetched ${totalSynced + buffer.length} sales...`)
+
+      // Once we hit the batch limit, flush to Firestore
+      if (buffer.length >= BATCH_LIMIT) {
+        await flushSalesToFirestore(uid, buffer, onProgress, totalSynced)
+        totalSynced += buffer.length
+        buffer = []
+        onProgress?.(`Stored ${totalSynced} sales so far, fetching more...`)
+      }
 
       // Use cursor-based pagination — follow the "next" URL from @attributes
       const nextAttr = attrs?.next as string | undefined
       if (nextAttr && nextAttr.length > 0) {
-        // The next URL is a relative path — prepend the API base
         nextUrl = nextAttr.startsWith('http')
           ? nextAttr
           : `https://api.lightspeedapp.com${nextAttr}`
@@ -374,7 +383,6 @@ export async function syncSales(
       }
     } catch (err) {
       if (err instanceof Error && err.message === 'UNAUTHORIZED') {
-        // Try refreshing the token and retry
         await ensureValidToken(uid)
         continue
       }
@@ -382,38 +390,51 @@ export async function syncSales(
     }
   }
 
-  // Batch write to Firestore
-  if (allSales.length > 0) {
-    onProgress?.(`Saving ${allSales.length} sales to Firestore...`)
-
-    // Firestore batch writes are limited to 500 operations
-    const batchSize = 250 // Each sale = 1 write, leave room
-    for (let i = 0; i < allSales.length; i += batchSize) {
-      const batch = writeBatch(db)
-      const chunk = allSales.slice(i, i + batchSize)
-
-      for (const sale of chunk) {
-        const saleRef = doc(db, 'users', uid, 'lightspeedSales', sale.saleID)
-        batch.set(saleRef, {
-          ...sale,
-          syncedAt: serverTimestamp(),
-          // Convert nested arrays to Firestore-friendly format
-          saleLines: sale.saleLines.map((l) => ({ ...l })),
-          salePayments: sale.salePayments.map((p) => ({ ...p })),
-        })
-      }
-
-      await batch.commit()
-      onProgress?.(`Saved ${Math.min(i + batchSize, allSales.length)} / ${allSales.length} sales...`)
-    }
+  // Flush any remaining sales in the buffer
+  if (buffer.length > 0) {
+    await flushSalesToFirestore(uid, buffer, onProgress, totalSynced)
+    totalSynced += buffer.length
   }
 
   // Update last sync timestamp
   await updateLastSalesSync(uid)
 
-  onProgress?.(`Sync complete! ${allSales.length} sales updated.`)
+  onProgress?.(`Sync complete! ${totalSynced} sales stored.`)
 
-  return { synced: allSales.length, total: allSales.length }
+  return { synced: totalSynced, total: totalSynced }
+}
+
+// ---- Flush a batch of sales to Firestore ----
+
+async function flushSalesToFirestore(
+  uid: string,
+  sales: LightspeedSale[],
+  onProgress?: (message: string) => void,
+  offsetCount = 0
+): Promise<void> {
+  if (!db || sales.length === 0) return
+
+  onProgress?.(`Saving ${sales.length} sales to Firestore...`)
+
+  // Firestore batch writes are limited to 500 operations
+  const batchSize = 250
+  for (let i = 0; i < sales.length; i += batchSize) {
+    const batch = writeBatch(db)
+    const chunk = sales.slice(i, i + batchSize)
+
+    for (const sale of chunk) {
+      const saleRef = doc(db, 'users', uid, 'lightspeedSales', sale.saleID)
+      batch.set(saleRef, {
+        ...sale,
+        syncedAt: serverTimestamp(),
+        saleLines: sale.saleLines.map((l) => ({ ...l })),
+        salePayments: sale.salePayments.map((p) => ({ ...p })),
+      })
+    }
+
+    await batch.commit()
+    onProgress?.(`Stored ${offsetCount + Math.min(i + batchSize, sales.length)} sales...`)
+  }
 }
 
 // ---- Load sales from Firestore ----
