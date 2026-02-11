@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
 import type { SavedTable } from '@/lib/types'
-import { collection, query, getDocs, doc, orderBy, updateDoc, addDoc, Timestamp, serverTimestamp } from 'firebase/firestore'
+import { collection, query, getDocs, doc, orderBy, updateDoc, addDoc, getDoc, setDoc, Timestamp, serverTimestamp } from 'firebase/firestore'
 import { db } from '@/lib/firebase'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
@@ -39,7 +39,7 @@ import type { LightspeedConnection } from '@/lib/types'
 
 const RECENT_PROJECTS_KEY = 'firegrid_recent_projects'
 
-function getRecentProjects(): string[] {
+function getRecentProjectsFromCache(): string[] {
   try {
     return JSON.parse(localStorage.getItem(RECENT_PROJECTS_KEY) || '[]')
   } catch {
@@ -47,10 +47,51 @@ function getRecentProjects(): string[] {
   }
 }
 
-function addRecentProject(projectId: string) {
-  const recent = getRecentProjects().filter((p) => p !== projectId)
-  recent.unshift(projectId)
-  localStorage.setItem(RECENT_PROJECTS_KEY, JSON.stringify(recent.slice(0, 10)))
+function setCachedProjects(projects: string[]) {
+  localStorage.setItem(RECENT_PROJECTS_KEY, JSON.stringify(projects.slice(0, 10)))
+}
+
+/** Fetch connected projects from Firestore for the given user. */
+async function fetchConnectedProjects(uid: string): Promise<string[]> {
+  if (!db) return []
+  try {
+    const userDoc = await getDoc(doc(db, 'users', uid))
+    const data = userDoc.data()
+    return Array.isArray(data?.connectedProjects) ? data.connectedProjects : []
+  } catch (err) {
+    console.warn('[Firegrid] Failed to fetch connected projects:', err)
+    return []
+  }
+}
+
+/** Persist the full projects list to Firestore and localStorage. */
+async function persistProjects(uid: string, projects: string[]) {
+  const trimmed = projects.slice(0, 10)
+  setCachedProjects(trimmed)
+  if (!db) return
+  try {
+    await setDoc(
+      doc(db, 'users', uid),
+      { connectedProjects: trimmed, updatedAt: serverTimestamp() },
+      { merge: true }
+    )
+  } catch (err) {
+    console.warn('[Firegrid] Failed to persist connected projects:', err)
+  }
+}
+
+/** Add a project to the front of the list and sync to Firestore + cache. */
+async function addRecentProject(uid: string, projectId: string, current: string[]): Promise<string[]> {
+  const next = [projectId, ...current.filter((p) => p !== projectId)].slice(0, 10)
+  await persistProjects(uid, next)
+  return next
+}
+
+/** Remove a project from the list and sync to Firestore + cache. */
+async function removeProject(uid: string, projectId: string, current: string[]): Promise<string[]> {
+  const next = current.filter((p) => p !== projectId)
+  await persistProjects(uid, next)
+  return next
 }
 
 // ---- Favourites helpers (localStorage) ----
@@ -93,7 +134,7 @@ export default function DashboardPage() {
   const [savedTables, setSavedTables] = useState<(SavedTable & { archived?: boolean; archivedAt?: Date })[]>([])
   const [loadingTables, setLoadingTables] = useState(true)
   const [projectId, setProjectId] = useState('')
-  const [recentProjects, setRecentProjects] = useState<string[]>(getRecentProjects())
+  const [recentProjects, setRecentProjects] = useState<string[]>(getRecentProjectsFromCache())
   const [showConnectForm, setShowConnectForm] = useState(false)
   const [tableView, setTableView] = useState<'cards' | 'list'>('cards')
   const [savedDashboards, setSavedDashboards] = useState<DashboardItem[]>([])
@@ -117,6 +158,24 @@ export default function DashboardPage() {
     if (user?.uid) {
       setFavourites(loadFavourites(user.uid))
     }
+  }, [user?.uid])
+
+  // Load connected projects from Firestore (source of truth)
+  useEffect(() => {
+    if (!user?.uid) return
+    fetchConnectedProjects(user.uid).then((firestoreProjects) => {
+      if (firestoreProjects.length > 0) {
+        // Firestore is source of truth — update state and cache
+        setRecentProjects(firestoreProjects)
+        setCachedProjects(firestoreProjects)
+      } else {
+        // First-time migration: push any localStorage projects to Firestore
+        const cached = getRecentProjectsFromCache()
+        if (cached.length > 0) {
+          persistProjects(user.uid, cached)
+        }
+      }
+    })
   }, [user?.uid])
 
   // Load Lightspeed connection status
@@ -308,18 +367,25 @@ export default function DashboardPage() {
   }
 
   const handleConnect = useCallback(
-    (id?: string) => {
+    async (id?: string) => {
       const target = (id || projectId).trim()
-      if (!target) return
-      addRecentProject(target)
-      setRecentProjects(getRecentProjects())
+      if (!target || !user?.uid) return
+      const updated = await addRecentProject(user.uid, target, recentProjects)
+      setRecentProjects(updated)
       setShowConnectForm(false)
-      if (user?.uid) {
-        trackProjectConnected(user.uid, target)
-      }
+      trackProjectConnected(user.uid, target)
       navigate(`/project/${target}`)
     },
-    [projectId, navigate, user?.uid]
+    [projectId, navigate, user?.uid, recentProjects]
+  )
+
+  const handleRemoveProject = useCallback(
+    async (pid: string) => {
+      if (!user?.uid) return
+      const updated = await removeProject(user.uid, pid, recentProjects)
+      setRecentProjects(updated)
+    },
+    [user?.uid, recentProjects]
   )
 
   const firstName = user?.displayName?.split(' ')[0] ?? ''

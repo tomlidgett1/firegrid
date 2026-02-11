@@ -324,36 +324,31 @@ export async function syncSales(
   const lastSync = conn?.lastSalesSync
 
   let allSales: LightspeedSale[] = []
-  let offset = 0
-  const pageSize = 100
-  let hasMore = true
+
+  // Build initial URL with relations
+  let nextUrl: string | null =
+    `${LS_API_BASE}/Account/${accountId}/Sale.json` +
+    `?load_relations=${encodeURIComponent('["SaleLines","SaleLines.Item","SalePayments","SalePayments.PaymentType","Customer","Employee","Shop"]')}` +
+    `&limit=100` +
+    `&orderby=updatetime` +
+    `&orderby_desc=1`
+
+  // Incremental sync — only fetch sales updated after last sync
+  if (lastSync) {
+    const syncDateStr = lastSync.toISOString().replace('Z', '+00:00')
+    nextUrl += `&updatetime=${encodeURIComponent('>,' + syncDateStr)}`
+  }
 
   onProgress?.('Fetching sales from Lightspeed...')
 
-  while (hasMore) {
-    // Build URL with relations and pagination
-    let url =
-      `${LS_API_BASE}/Account/${accountId}/Sale.json` +
-      `?load_relations=${encodeURIComponent('["SaleLines","SaleLines.Item","SalePayments","SalePayments.PaymentType","Customer","Employee","Shop"]')}` +
-      `&limit=${pageSize}` +
-      `&offset=${offset}` +
-      `&orderby=updatetime` +
-      `&orderby_desc=1`
-
-    // Incremental sync — only fetch sales updated after last sync
-    if (lastSync) {
-      const syncDateStr = lastSync.toISOString().replace('Z', '+00:00')
-      url += `&updatetime=${encodeURIComponent('>,' + syncDateStr)}`
-    }
-
+  while (nextUrl) {
     try {
-      const { data } = await lsApiFetch(url, accessToken)
+      const { data } = await lsApiFetch(nextUrl, accessToken)
       const responseData = data as Record<string, unknown>
       const attrs = responseData['@attributes'] as Record<string, unknown> | undefined
       const rawSales = responseData.Sale
 
       if (!rawSales) {
-        hasMore = false
         break
       }
 
@@ -363,23 +358,25 @@ export async function syncSales(
 
       onProgress?.(`Fetched ${allSales.length} sales...`)
 
-      // Check if there are more pages
-      const count = Number(attrs?.count || 0)
-      if (salesArray.length < pageSize || allSales.length >= count) {
-        hasMore = false
+      // Use cursor-based pagination — follow the "next" URL from @attributes
+      const nextAttr = attrs?.next as string | undefined
+      if (nextAttr && nextAttr.length > 0) {
+        // The next URL is a relative path — prepend the API base
+        nextUrl = nextAttr.startsWith('http')
+          ? nextAttr
+          : `https://api.lightspeedapp.com${nextAttr}`
       } else {
-        offset += pageSize
+        nextUrl = null
       }
 
       // Rate limit safety — small delay between pages
-      if (hasMore) {
+      if (nextUrl) {
         await new Promise((r) => setTimeout(r, 500))
       }
     } catch (err) {
       if (err instanceof Error && err.message === 'UNAUTHORIZED') {
         // Try refreshing the token and retry
-        const refreshed = await ensureValidToken(uid)
-        // Will retry on next iteration with new token
+        await ensureValidToken(uid)
         continue
       }
       throw err
