@@ -55,7 +55,7 @@ export default function HeroSection() {
             Get Started Free
           </Link>
           <a
-            href="https://producthunt.com/posts/firegrid"
+            href="https://www.producthunt.com/products/firegrid-firestore-table-builder"
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center gap-1.5 text-sm text-gray-400 hover:text-gray-600 transition-colors border border-gray-200 rounded-md px-6 py-2.5"
