@@ -1,0 +1,40 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --color-primary-50: #eff6ff;
+  --color-primary-100: #dbeafe;
+  --color-primary-200: #bfdbfe;
+  --color-primary-300: #93c5fd;
+  --color-primary-400: #60a5fa;
+  --color-primary-500: #3b82f6;
+  --color-primary-600: #2563eb;
+  --color-primary-700: #1d4ed8;
+  --color-primary-800: #1e40af;
+  --color-primary-900: #1e3a8a;
+
+  --color-fire-50: #fff7ed;
+  --color-fire-100: #ffedd5;
+  --color-fire-200: #fed7aa;
+  --color-fire-300: #fdba74;
+  --color-fire-400: #fb923c;
+  --color-fire-500: #f97316;
+  --color-fire-600: #ea580c;
+  --color-fire-700: #c2410c;
+}
+
+/* SQL syntax highlighting */
+.sql-keyword { color: #7c3aed; font-weight: 600; }
+.sql-function { color: #2563eb; }
+.sql-string { color: #16a34a; }
+.sql-number { color: #d97706; }
+.sql-comment { color: #9ca3af; font-style: italic; }
+.sql-operator { color: #dc2626; }
+
+:where(.dark, .dark *) .sql-keyword { color: #a78bfa; }
+:where(.dark, .dark *) .sql-function { color: #60a5fa; }
+:where(.dark, .dark *) .sql-string { color: #4ade80; }
+:where(.dark, .dark *) .sql-number { color: #fbbf24; }
+:where(.dark, .dark *) .sql-comment { color: #6b7280; }
+:where(.dark, .dark *) .sql-operator { color: #f87171; }
