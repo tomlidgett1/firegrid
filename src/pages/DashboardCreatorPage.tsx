@@ -3769,6 +3769,16 @@ function ConditionalFormattingSection({
     onChange(rules.filter((r) => r.id !== id))
   }
 
+  const moveRule = (id: string, direction: 'up' | 'down') => {
+    const idx = rules.findIndex((r) => r.id === id)
+    if (idx < 0) return
+    const swapIdx = direction === 'up' ? idx - 1 : idx + 1
+    if (swapIdx < 0 || swapIdx >= rules.length) return
+    const next = [...rules]
+    ;[next[idx], next[swapIdx]] = [next[swapIdx], next[idx]]
+    onChange(next)
+  }
+
   const needsValue = (op: CondFormatOperator) => !['is_empty', 'is_not_empty'].includes(op)
   const needsColour = (style: CondFormatStyle) => ['bg', 'text'].includes(style)
 
@@ -3802,9 +3812,50 @@ function ConditionalFormattingSection({
                 <p className="text-[10px] text-gray-400 py-1">No rules yet. Add one to highlight cells based on their values.</p>
               )}
 
-              {rules.map((rule) => (
+              {rules.map((rule, ruleIdx) => (
                 <div key={rule.id} className="bg-white border border-gray-200 rounded-md p-2.5 space-y-2">
-                  {/* Row 1: column, operator, enable/delete */}
+                  {/* Header: priority arrows, enable/delete */}
+                  <div className="flex items-center gap-1">
+                    {/* Priority reorder */}
+                    <div className="flex flex-col gap-0 shrink-0">
+                      <button
+                        onClick={() => moveRule(rule.id, 'up')}
+                        disabled={ruleIdx === 0}
+                        className="p-0 text-gray-300 hover:text-gray-500 disabled:opacity-20 cursor-pointer disabled:cursor-default"
+                        title="Move up (higher priority)"
+                      >
+                        <ArrowUp size={9} />
+                      </button>
+                      <button
+                        onClick={() => moveRule(rule.id, 'down')}
+                        disabled={ruleIdx === rules.length - 1}
+                        className="p-0 text-gray-300 hover:text-gray-500 disabled:opacity-20 cursor-pointer disabled:cursor-default"
+                        title="Move down (lower priority)"
+                      >
+                        <ArrowDown size={9} />
+                      </button>
+                    </div>
+                    <span className="text-[9px] text-gray-300 w-3 text-center shrink-0">{ruleIdx + 1}</span>
+
+                    <div className="flex-1" />
+
+                    <button
+                      onClick={() => updateRule(rule.id, { enabled: !rule.enabled })}
+                      className={cn('p-0.5 transition-colors rounded cursor-pointer', rule.enabled ? 'text-gray-500' : 'text-gray-300')}
+                      title={rule.enabled ? 'Disable rule' : 'Enable rule'}
+                    >
+                      {rule.enabled ? <ToggleRight size={14} /> : <ToggleLeft size={14} />}
+                    </button>
+                    <button
+                      onClick={() => removeRule(rule.id)}
+                      className="p-0.5 text-gray-300 hover:text-red-500 transition-colors rounded cursor-pointer"
+                      title="Delete rule"
+                    >
+                      <Trash2 size={10} />
+                    </button>
+                  </div>
+
+                  {/* Row 1: column + operator */}
                   <div className="flex items-center gap-1.5">
                     <select
                       value={rule.column}
@@ -3824,20 +3875,6 @@ function ConditionalFormattingSection({
                         <option key={k} value={k}>{v}</option>
                       ))}
                     </select>
-                    <button
-                      onClick={() => updateRule(rule.id, { enabled: !rule.enabled })}
-                      className={cn('p-0.5 transition-colors rounded cursor-pointer', rule.enabled ? 'text-gray-500' : 'text-gray-300')}
-                      title={rule.enabled ? 'Disable rule' : 'Enable rule'}
-                    >
-                      {rule.enabled ? <ToggleRight size={14} /> : <ToggleLeft size={14} />}
-                    </button>
-                    <button
-                      onClick={() => removeRule(rule.id)}
-                      className="p-0.5 text-gray-300 hover:text-red-500 transition-colors rounded cursor-pointer"
-                      title="Delete rule"
-                    >
-                      <Trash2 size={10} />
-                    </button>
                   </div>
 
                   {/* Row 2: value(s) */}
@@ -3865,7 +3902,7 @@ function ConditionalFormattingSection({
                     </div>
                   )}
 
-                  {/* Row 3: style, colour, target */}
+                  {/* Row 3: style + target */}
                   <div className="flex items-center gap-1.5">
                     <select
                       value={rule.style}
@@ -3876,39 +3913,37 @@ function ConditionalFormattingSection({
                         <option key={k} value={k}>{v}</option>
                       ))}
                     </select>
-
-                    {needsColour(rule.style) && (
-                      <div className="flex items-center gap-1">
-                        <input
-                          type="color"
-                          value={rule.colour}
-                          onChange={(e) => updateRule(rule.id, { colour: e.target.value })}
-                          className="w-5 h-5 rounded border border-gray-200 cursor-pointer p-0"
-                        />
-                        <div className="flex gap-0.5">
-                          {PRESET_COLOURS.slice(0, 8).map((c) => (
-                            <button
-                              key={c}
-                              onClick={() => updateRule(rule.id, { colour: c })}
-                              className={cn('w-3.5 h-3.5 rounded-sm border cursor-pointer transition-transform hover:scale-125', rule.colour === c ? 'border-gray-500 scale-110' : 'border-gray-200')}
-                              style={{ backgroundColor: c }}
-                            />
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    <div className="flex-1" />
-
                     <select
                       value={rule.target}
                       onChange={(e) => updateRule(rule.id, { target: e.target.value as CondFormatTarget })}
                       className="text-[10px] border border-gray-200 rounded-md px-1.5 py-1 text-gray-700 bg-white focus:outline-none focus:border-gray-400"
                     >
-                      <option value="cell">Cell</option>
+                      <option value="cell">Cell only</option>
                       <option value="row">Entire row</option>
                     </select>
                   </div>
+
+                  {/* Row 4: colour (when applicable) */}
+                  {needsColour(rule.style) && (
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="color"
+                        value={rule.colour}
+                        onChange={(e) => updateRule(rule.id, { colour: e.target.value })}
+                        className="w-5 h-5 rounded border border-gray-200 cursor-pointer p-0 shrink-0"
+                      />
+                      <div className="flex gap-0.5 flex-wrap">
+                        {PRESET_COLOURS.map((c) => (
+                          <button
+                            key={c}
+                            onClick={() => updateRule(rule.id, { colour: c })}
+                            className={cn('w-3.5 h-3.5 rounded-sm border cursor-pointer transition-transform hover:scale-125', rule.colour === c ? 'border-gray-500 scale-110' : 'border-gray-200')}
+                            style={{ backgroundColor: c }}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
                   {/* Preview swatch */}
                   <div
