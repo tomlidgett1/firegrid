@@ -74,8 +74,8 @@ function ProtectedRoute({ children }: { children: ReactNode }) {
 }
 
 /**
- * Detects Lightspeed OAuth callback at the root URL.
- * Lightspeed redirects to https://www.firegrid.co?code=xxx&state=xxx
+ * Detects Lightspeed OAuth callback at the dashboard URL.
+ * Lightspeed redirects to https://www.firegrid.co/dashboard?code=xxx&state=xxx
  * This component catches that and forwards to the callback page.
  */
 function LightspeedRedirectGuard({ children }: { children: ReactNode }) {
@@ -83,7 +83,7 @@ function LightspeedRedirectGuard({ children }: { children: ReactNode }) {
   const navigate = useNavigate()
 
   useEffect(() => {
-    if (location.pathname === '/') {
+    if (location.pathname === '/dashboard' || location.pathname === '/') {
       const params = new URLSearchParams(location.search)
       if (params.has('code')) {
         // Lightspeed OAuth callback — redirect to our handler
