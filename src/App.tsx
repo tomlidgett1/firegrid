@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from '@/contexts/AuthContext'
 import { ThemeProvider } from '@/contexts/ThemeContext'
 import LoginPage from '@/pages/LoginPage'
@@ -14,7 +14,7 @@ import CollectionExplorerPage from '@/pages/CollectionExplorerPage'
 import LightspeedCallbackPage from '@/pages/LightspeedCallbackPage'
 import SalesPage from '@/pages/SalesPage'
 import { Loader2, RefreshCw } from 'lucide-react'
-import { useState, type ReactNode } from 'react'
+import { useState, useEffect, type ReactNode } from 'react'
 
 function ProtectedRoute({ children }: { children: ReactNode }) {
   const { user, loading, signIn } = useAuth()
@@ -69,6 +69,28 @@ function ProtectedRoute({ children }: { children: ReactNode }) {
       </div>
     )
   }
+
+  return <>{children}</>
+}
+
+/**
+ * Detects Lightspeed OAuth callback at the root URL.
+ * Lightspeed redirects to https://www.firegrid.co?code=xxx&state=xxx
+ * This component catches that and forwards to the callback page.
+ */
+function LightspeedRedirectGuard({ children }: { children: ReactNode }) {
+  const location = useLocation()
+  const navigate = useNavigate()
+
+  useEffect(() => {
+    if (location.pathname === '/') {
+      const params = new URLSearchParams(location.search)
+      if (params.has('code')) {
+        // Lightspeed OAuth callback — redirect to our handler
+        navigate(`/lightspeed/callback${location.search}`, { replace: true })
+      }
+    }
+  }, [location.pathname, location.search, navigate])
 
   return <>{children}</>
 }
@@ -183,7 +205,9 @@ export default function App() {
     <BrowserRouter>
       <ThemeProvider>
         <AuthProvider>
-          <AppRoutes />
+          <LightspeedRedirectGuard>
+            <AppRoutes />
+          </LightspeedRedirectGuard>
         </AuthProvider>
       </ThemeProvider>
     </BrowserRouter>

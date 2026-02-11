@@ -2481,7 +2481,7 @@ function WidgetCard({
                       )}
                     </tr>
                     )
-                  }))
+                  })
                 ) : (
                   <tr>
                     <td
