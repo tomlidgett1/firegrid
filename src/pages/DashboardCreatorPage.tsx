@@ -58,6 +58,7 @@ import {
   Calendar,
   CaseSensitive,
   MousePointer2,
+  Minus as MinusIcon,
 } from 'lucide-react'
 import {
   BarChart,
@@ -288,6 +289,7 @@ export default function DashboardCreatorPage() {
   const [isDragging, setIsDragging] = useState(false)
   const [editMode, setEditMode] = useState(!dashboardId) // new dashboards start in edit mode
   const [configuringWidgetId, setConfiguringWidgetId] = useState<string | null>(null)
+  const [selectedColKey, setSelectedColKey] = useState<string | null>(null)
   const pickerRef = useRef<HTMLDivElement>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
   const gridContainerRef = useRef<HTMLDivElement>(null)
@@ -1274,6 +1276,251 @@ export default function DashboardCreatorPage() {
         </div>
       </div>
 
+      {/* Format Toolbar — visible in edit mode */}
+      {editMode && (
+        <div className="flex items-center gap-0.5 px-4 py-1 border-b border-gray-200 bg-white shrink-0">
+          {/* Currency */}
+          <button
+            onClick={() => {
+              if (!configuringWidgetId || !selectedColKey) return
+              const w = widgets.find((ww) => ww.i === configuringWidgetId)
+              if (!w) return
+              const prev = w.columnFormats || {}
+              const current = prev[selectedColKey]
+              if (current?.type === 'currency') {
+                const next = { ...prev }; delete next[selectedColKey]
+                updateWidgetColumnFormats(configuringWidgetId, next)
+              } else {
+                updateWidgetColumnFormats(configuringWidgetId, { ...prev, [selectedColKey]: { type: 'currency', decimals: 2, currency: 'USD' } })
+              }
+            }}
+            disabled={!configuringWidgetId || !selectedColKey}
+            className={cn(
+              'px-2 py-1.5 text-xs font-medium rounded-md transition-colors cursor-pointer',
+              configuringWidgetId && selectedColKey && widgets.find((w) => w.i === configuringWidgetId)?.columnFormats?.[selectedColKey]?.type === 'currency'
+                ? 'text-gray-800 bg-gray-100'
+                : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50',
+              (!configuringWidgetId || !selectedColKey) && 'opacity-40 cursor-default'
+            )}
+            title="Currency"
+          >
+            <DollarSign size={14} />
+          </button>
+
+          {/* Percent */}
+          <button
+            onClick={() => {
+              if (!configuringWidgetId || !selectedColKey) return
+              const w = widgets.find((ww) => ww.i === configuringWidgetId)
+              if (!w) return
+              const prev = w.columnFormats || {}
+              const current = prev[selectedColKey]
+              if (current?.type === 'percent') {
+                const next = { ...prev }; delete next[selectedColKey]
+                updateWidgetColumnFormats(configuringWidgetId, next)
+              } else {
+                updateWidgetColumnFormats(configuringWidgetId, { ...prev, [selectedColKey]: { type: 'percent', decimals: 1 } })
+              }
+            }}
+            disabled={!configuringWidgetId || !selectedColKey}
+            className={cn(
+              'px-2 py-1.5 text-xs font-medium rounded-md transition-colors cursor-pointer',
+              configuringWidgetId && selectedColKey && widgets.find((w) => w.i === configuringWidgetId)?.columnFormats?.[selectedColKey]?.type === 'percent'
+                ? 'text-gray-800 bg-gray-100'
+                : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50',
+              (!configuringWidgetId || !selectedColKey) && 'opacity-40 cursor-default'
+            )}
+            title="Percent"
+          >
+            <Percent size={14} />
+          </button>
+
+          {/* Number */}
+          <button
+            onClick={() => {
+              if (!configuringWidgetId || !selectedColKey) return
+              const w = widgets.find((ww) => ww.i === configuringWidgetId)
+              if (!w) return
+              const prev = w.columnFormats || {}
+              const current = prev[selectedColKey]
+              if (current?.type === 'number') {
+                const next = { ...prev }; delete next[selectedColKey]
+                updateWidgetColumnFormats(configuringWidgetId, next)
+              } else {
+                updateWidgetColumnFormats(configuringWidgetId, { ...prev, [selectedColKey]: { type: 'number', decimals: 2, thousandSep: true } })
+              }
+            }}
+            disabled={!configuringWidgetId || !selectedColKey}
+            className={cn(
+              'px-2 py-1.5 text-xs font-medium rounded-md transition-colors cursor-pointer',
+              configuringWidgetId && selectedColKey && widgets.find((w) => w.i === configuringWidgetId)?.columnFormats?.[selectedColKey]?.type === 'number'
+                ? 'text-gray-800 bg-gray-100'
+                : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50',
+              (!configuringWidgetId || !selectedColKey) && 'opacity-40 cursor-default'
+            )}
+            title="Number"
+          >
+            <Hash size={14} />
+          </button>
+
+          {/* Separator */}
+          <div className="w-px h-5 bg-gray-200 mx-1" />
+
+          {/* Decrease decimal */}
+          <button
+            onClick={() => {
+              if (!configuringWidgetId || !selectedColKey) return
+              const w = widgets.find((ww) => ww.i === configuringWidgetId)
+              if (!w) return
+              const prev = w.columnFormats || {}
+              const current = prev[selectedColKey]
+              if (current && ['number', 'currency', 'percent'].includes(current.type)) {
+                const newDec = Math.max(0, (current.decimals ?? 2) - 1)
+                updateWidgetColumnFormats(configuringWidgetId, { ...prev, [selectedColKey]: { ...current, decimals: newDec } })
+              }
+            }}
+            disabled={!configuringWidgetId || !selectedColKey || !(() => {
+              const w = widgets.find((ww) => ww.i === configuringWidgetId)
+              const fmt = w?.columnFormats?.[selectedColKey!]
+              return fmt && ['number', 'currency', 'percent'].includes(fmt.type)
+            })()}
+            className={cn(
+              'px-1.5 py-1.5 text-xs font-medium rounded-md transition-colors cursor-pointer text-gray-500 hover:text-gray-700 hover:bg-gray-50',
+              'disabled:opacity-40 disabled:cursor-default'
+            )}
+            title="Decrease decimals"
+          >
+            <span className="text-[10px] font-semibold tabular-nums">.0</span>
+            <MinusIcon size={8} className="inline ml-0.5 -mt-0.5" />
+          </button>
+
+          {/* Increase decimal */}
+          <button
+            onClick={() => {
+              if (!configuringWidgetId || !selectedColKey) return
+              const w = widgets.find((ww) => ww.i === configuringWidgetId)
+              if (!w) return
+              const prev = w.columnFormats || {}
+              const current = prev[selectedColKey]
+              if (current && ['number', 'currency', 'percent'].includes(current.type)) {
+                const newDec = Math.min(10, (current.decimals ?? 2) + 1)
+                updateWidgetColumnFormats(configuringWidgetId, { ...prev, [selectedColKey]: { ...current, decimals: newDec } })
+              }
+            }}
+            disabled={!configuringWidgetId || !selectedColKey || !(() => {
+              const w = widgets.find((ww) => ww.i === configuringWidgetId)
+              const fmt = w?.columnFormats?.[selectedColKey!]
+              return fmt && ['number', 'currency', 'percent'].includes(fmt.type)
+            })()}
+            className={cn(
+              'px-1.5 py-1.5 text-xs font-medium rounded-md transition-colors cursor-pointer text-gray-500 hover:text-gray-700 hover:bg-gray-50',
+              'disabled:opacity-40 disabled:cursor-default'
+            )}
+            title="Increase decimals"
+          >
+            <span className="text-[10px] font-semibold tabular-nums">.0</span>
+            <Plus size={8} className="inline ml-0.5 -mt-0.5" />
+          </button>
+
+          {/* Separator */}
+          <div className="w-px h-5 bg-gray-200 mx-1" />
+
+          {/* Date */}
+          <button
+            onClick={() => {
+              if (!configuringWidgetId || !selectedColKey) return
+              const w = widgets.find((ww) => ww.i === configuringWidgetId)
+              if (!w) return
+              const prev = w.columnFormats || {}
+              const current = prev[selectedColKey]
+              if (current?.type === 'date') {
+                const next = { ...prev }; delete next[selectedColKey]
+                updateWidgetColumnFormats(configuringWidgetId, next)
+              } else {
+                updateWidgetColumnFormats(configuringWidgetId, { ...prev, [selectedColKey]: { type: 'date', dateFormat: 'medium' } })
+              }
+            }}
+            disabled={!configuringWidgetId || !selectedColKey}
+            className={cn(
+              'px-2 py-1.5 text-xs font-medium rounded-md transition-colors cursor-pointer',
+              configuringWidgetId && selectedColKey && (widgets.find((w) => w.i === configuringWidgetId)?.columnFormats?.[selectedColKey]?.type === 'date' || widgets.find((w) => w.i === configuringWidgetId)?.columnFormats?.[selectedColKey]?.type === 'datetime')
+                ? 'text-gray-800 bg-gray-100'
+                : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50',
+              (!configuringWidgetId || !selectedColKey) && 'opacity-40 cursor-default'
+            )}
+            title="Date"
+          >
+            <Calendar size={14} />
+          </button>
+
+          {/* Text */}
+          <button
+            onClick={() => {
+              if (!configuringWidgetId || !selectedColKey) return
+              const w = widgets.find((ww) => ww.i === configuringWidgetId)
+              if (!w) return
+              const prev = w.columnFormats || {}
+              const current = prev[selectedColKey]
+              if (current?.type === 'text') {
+                const next = { ...prev }; delete next[selectedColKey]
+                updateWidgetColumnFormats(configuringWidgetId, next)
+              } else {
+                updateWidgetColumnFormats(configuringWidgetId, { ...prev, [selectedColKey]: { type: 'text' } })
+              }
+            }}
+            disabled={!configuringWidgetId || !selectedColKey}
+            className={cn(
+              'px-2 py-1.5 text-xs font-medium rounded-md transition-colors cursor-pointer',
+              configuringWidgetId && selectedColKey && widgets.find((w) => w.i === configuringWidgetId)?.columnFormats?.[selectedColKey]?.type === 'text'
+                ? 'text-gray-800 bg-gray-100'
+                : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50',
+              (!configuringWidgetId || !selectedColKey) && 'opacity-40 cursor-default'
+            )}
+            title="Text"
+          >
+            <CaseSensitive size={14} />
+          </button>
+
+          {/* Separator */}
+          <div className="w-px h-5 bg-gray-200 mx-1" />
+
+          {/* Clear format */}
+          <button
+            onClick={() => {
+              if (!configuringWidgetId || !selectedColKey) return
+              const w = widgets.find((ww) => ww.i === configuringWidgetId)
+              if (!w) return
+              const prev = w.columnFormats || {}
+              if (prev[selectedColKey]) {
+                const next = { ...prev }; delete next[selectedColKey]
+                updateWidgetColumnFormats(configuringWidgetId, next)
+              }
+            }}
+            disabled={!configuringWidgetId || !selectedColKey}
+            className={cn(
+              'px-2 py-1.5 text-[10px] font-medium rounded-md transition-colors cursor-pointer text-gray-500 hover:text-gray-700 hover:bg-gray-50',
+              (!configuringWidgetId || !selectedColKey) && 'opacity-40 cursor-default'
+            )}
+            title="Clear format (Auto)"
+          >
+            Auto
+          </button>
+
+          {/* Active column indicator */}
+          {selectedColKey && configuringWidgetId && (
+            <span className="ml-2 text-[10px] text-gray-400 truncate max-w-[160px]">
+              Column: <span className="font-medium text-gray-600">{selectedColKey}</span>
+              {(() => {
+                const w = widgets.find((ww) => ww.i === configuringWidgetId)
+                const fmt = w?.columnFormats?.[selectedColKey]
+                if (!fmt) return null
+                return <span className="ml-1 text-gray-400">({COL_FORMAT_LABELS[fmt.type as ColFormatType]})</span>
+              })()}
+            </span>
+          )}
+        </div>
+      )}
+
       {/* Body: grid + optional side panel */}
       <div className="flex flex-1 min-h-0">
       {/* Grid Canvas — full width, no max constraint */}
@@ -1370,6 +1617,7 @@ export default function DashboardCreatorPage() {
                           }
                         }}
                         onColumnFormatsChange={(fmts) => updateWidgetColumnFormats(widget.i, fmts)}
+                        onColumnSelect={(colKey) => setSelectedColKey(colKey)}
                       />
                     )
                   }
@@ -1424,6 +1672,7 @@ export default function DashboardCreatorPage() {
                         onDisplayNameChange={(name) => updateWidgetDisplayName(widget.i, name)}
                         onPivotConfigChange={(config) => updateWidgetPivotConfig(widget.i, config)}
                         onColumnFormatsChange={(fmts) => updateWidgetColumnFormats(widget.i, fmts)}
+                        onColumnSelect={(colKey) => setSelectedColKey(colKey)}
                       />
                     )
                   }
@@ -1460,7 +1709,10 @@ export default function DashboardCreatorPage() {
                       willChange: (isDrag || isRsz) ? 'left, top, width, height' : undefined,
                     }}
                     onClick={() => {
-                      if (editMode) setConfiguringWidgetId(widget.i)
+                      if (editMode) {
+                        if (configuringWidgetId !== widget.i) setSelectedColKey(null)
+                        setConfiguringWidgetId(widget.i)
+                      }
                     }}
                     onMouseDown={(e) => {
                       if (!editMode) return
@@ -2051,6 +2303,7 @@ function WidgetCard({
   onOpenConfig,
   onOpenTable,
   onColumnFormatsChange,
+  onColumnSelect,
 }: {
   widget: DashboardWidget
   table: SavedTable | undefined
@@ -2068,6 +2321,7 @@ function WidgetCard({
   onOpenConfig: () => void
   onOpenTable: () => void
   onColumnFormatsChange: (formats: Record<string, ColumnFormat>) => void
+  onColumnSelect: (colKey: string) => void
 }) {
   const [rows, setRows] = useState<Record<string, unknown>[]>([])
   const [loading, setLoading] = useState(false)
@@ -2465,7 +2719,7 @@ function WidgetCard({
                     return (
                       <th
                         key={colKey}
-                        onClick={() => { if (!isEditingCol) handleSort(colKey) }}
+                        onClick={() => { if (!isEditingCol) { handleSort(colKey); if (editMode) onColumnSelect(colKey) } }}
                         onDoubleClick={(e) => {
                           if (!editMode) return
                           e.stopPropagation()
@@ -5929,6 +6183,7 @@ function PivotCard({
   onDisplayNameChange,
   onPivotConfigChange,
   onColumnFormatsChange,
+  onColumnSelect,
 }: {
   widget: DashboardWidget
   savedTables: SavedTable[]
@@ -5940,6 +6195,7 @@ function PivotCard({
   onDisplayNameChange: (name: string) => void
   onPivotConfigChange: (config: PivotConfig) => void
   onColumnFormatsChange: (formats: Record<string, ColumnFormat>) => void
+  onColumnSelect: (colKey: string) => void
 }) {
   const config = widget.pivotConfig
   const [rows, setRows] = useState<Record<string, unknown>[]>([])
@@ -6209,7 +6465,8 @@ function PivotCard({
                   <th
                     key={rh}
                     ref={(el) => { if (el) thRefs.current.set(ri, el); else thRefs.current.delete(ri) }}
-                    className="text-left px-3 py-2.5 text-xs font-medium text-gray-600 border-b border-gray-200 sticky top-0 bg-gray-200/70 relative select-none overflow-hidden text-ellipsis whitespace-nowrap group/th"
+                    className="text-left px-3 py-2.5 text-xs font-medium text-gray-600 border-b border-gray-200 sticky top-0 bg-gray-200/70 relative select-none overflow-hidden text-ellipsis whitespace-nowrap group/th cursor-pointer"
+                    onClick={() => { if (editMode) onColumnSelect(rh) }}
                   >
                     <span className="inline-flex items-center gap-1">
                       {rh}
@@ -6257,7 +6514,13 @@ function PivotCard({
                     <th
                       key={i}
                       ref={(el) => { if (el) thRefs.current.set(ci, el); else thRefs.current.delete(ci) }}
-                      className="text-right px-3 py-2.5 text-xs font-medium text-gray-600 border-b border-gray-200 sticky top-0 bg-gray-50/80 whitespace-nowrap relative select-none overflow-hidden text-ellipsis group/th"
+                      className="text-right px-3 py-2.5 text-xs font-medium text-gray-600 border-b border-gray-200 sticky top-0 bg-gray-50/80 whitespace-nowrap relative select-none overflow-hidden text-ellipsis group/th cursor-pointer"
+                      onClick={() => {
+                        if (!editMode) return
+                        const vc = config?.values[i % (config?.values.length || 1)]
+                        const fk = vc ? (vc.column || vc.id) : String(i)
+                        onColumnSelect(fk)
+                      }}
                     >
                       {editingColIdx === i && editMode ? (
                         <input
