@@ -1,7 +1,7 @@
 import { useAuth } from '@/contexts/AuthContext'
 import { useNavigate } from 'react-router-dom'
 import { useEffect, useState } from 'react'
-import { Flame, AlertCircle } from 'lucide-react'
+import { AlertCircle } from 'lucide-react'
 
 export default function LoginPage() {
   const { user, signIn, configured } = useAuth()
@@ -51,9 +51,7 @@ export default function LoginPage() {
       {/* Content */}
       <div className="relative z-10 flex flex-col items-center">
         {/* Icon */}
-        <div className="w-12 h-12 bg-fire-500 rounded-md flex items-center justify-center shadow-lg shadow-fire-500/25 mb-6">
-          <Flame className="w-6 h-6 text-white" />
-        </div>
+        <img src="/logo.png" alt="Firegrid" className="w-12 h-12 rounded-md mb-6" />
 
         {/* Name */}
         <h1 className="text-3xl font-bold text-white tracking-tight mb-2">

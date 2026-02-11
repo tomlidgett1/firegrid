@@ -6,7 +6,6 @@ import {
   Terminal,
   LayoutGrid,
   FolderOpen,
-  Flame,
   ChevronRight,
   ChevronDown,
   Eye,
@@ -26,35 +25,22 @@ import {
   Plus,
   Lock,
   Database,
-  FileText,
-  FolderTree,
-  ArrowRight,
-  Wand2,
 } from 'lucide-react'
 
 type Slide = 'collections' | 'table' | 'sql' | 'dashboard'
 
-const slideInfo: Record<Slide, { label: string; title: string; description: string }> = {
-  collections: {
-    label: 'Browse',
-    title: 'Explore your collections and schemas',
-    description: 'Navigate your entire Firestore hierarchy. Firegrid samples documents to automatically discover fields, types, and sub-collections.',
-  },
-  table: {
-    label: 'Build Tables',
-    title: 'Turn any collection into a custom table',
-    description: 'Configure columns, set aliases, sort, filter, and export — all from a familiar spreadsheet-like interface.',
-  },
-  sql: {
-    label: 'SQL Queries',
-    title: 'Query across collections with SQL',
-    description: 'Write familiar SQL to join, filter, and aggregate data across your Firestore collections. Runs entirely client-side.',
-  },
-  dashboard: {
-    label: 'Dashboards',
-    title: 'Build dashboards from your data',
-    description: 'Combine tables, metrics, and charts into drag-and-drop dashboards you can save and share.',
-  },
+const slideLabels: Record<Slide, string> = {
+  collections: 'Explorer',
+  table: 'Build Tables',
+  sql: 'SQL Queries',
+  dashboard: 'Dashboards',
+}
+
+const slideCaptions: Record<Slide, string> = {
+  collections: 'Browse any collection, double-click cells to edit inline, and discover sub-collections.',
+  table: 'Pick columns, set aliases, sort and filter — then export to CSV or JSON.',
+  sql: 'Write SQL across your collections. Joins, aggregates, filters — all client-side.',
+  dashboard: 'Drag-and-drop metrics, charts, and tables into shareable dashboards.',
 }
 
 const slideIcons: Record<Slide, typeof Table> = {
@@ -73,9 +59,7 @@ function AppHeader({ breadcrumbs }: { breadcrumbs: string[] }) {
     <div className="bg-white border-b border-gray-200 px-4 h-10 flex items-center justify-between shrink-0">
       <div className="flex items-center gap-1.5">
         <ChevronLeft size={14} className="text-gray-400" />
-        <div className="w-5 h-5 bg-fire-500 rounded-md flex items-center justify-center">
-          <Flame className="w-3 h-3 text-white" />
-        </div>
+        <img src="/logo.png" alt="Firegrid" className="w-5 h-5 rounded-md" />
         <span className="font-semibold text-[11px] text-gray-900">Firegrid</span>
         {breadcrumbs.map((crumb, i) => (
           <span key={i} className="flex items-center gap-1.5">
@@ -97,171 +81,152 @@ function AppHeader({ breadcrumbs }: { breadcrumbs: string[] }) {
    Slide 0: Browse Collections (exact replica of ProjectPage)
    ────────────────────────────────────────────────────────── */
 
-const schemaFields = [
-  { path: 'email', type: 'string', coverage: 100, sample: 'sarah@company.io' },
-  { path: 'displayName', type: 'string', coverage: 100, sample: 'Sarah Chen' },
-  { path: 'plan', type: 'string', coverage: 98, sample: 'team' },
-  { path: 'status', type: 'string', coverage: 95, sample: 'active' },
-  { path: 'createdAt', type: 'timestamp', coverage: 100, sample: '2025-01-15T09:30:00Z' },
-  { path: 'lastLogin', type: 'timestamp', coverage: 88, sample: '2025-03-11T14:22:00Z' },
-  { path: 'photoURL', type: 'string', coverage: 72, sample: 'https://lh3.google…' },
-  { path: 'preferences.theme', type: 'string', coverage: 65, sample: 'dark' },
+const explorerHeaders = ['Document ID', 'signInMethod', 'hasSeenHowTapWorks', 'customerid', 'email', 'fullName', 'appVersion', 'occupation', 'location']
+
+const explorerRows = [
+  ['6AP1Dv4cjNhiP0f49zXPM…', 'email', 'false', '6AP1Dv4cjNhiPOf49zXPMdiOe7M2', 't@dss.com', 'J J', '1.2', 'Employed', '{"updatedAt":"2026-02-03T02:3…'],
+  ['BzhTcEiJNlb6BCSU4zj86…', 'apple', 'false', 'BzhTcEiJNlb6BCSU4zj86waiq983', 'tqygdksbp@privaterelay.com', '', '1.2', 'null', 'null'],
+  ['DZzDy4fuJWO78FjWgnNWC…', 'apple', 'true', 'DZzDy4fuJWO78FjWgnNWCiu6QhB3', 'fyngpskf2p@privaterelay.com', 'Gus MacDonald', '1.2', 'null', 'null'],
+  ['DpADsUGKvRVd98P9fYKEe…', 'google', 'true', 'DpADsUGKvRVd98P9fYKEe4g8ErJ3', 'tom@lidgett.net', 'Tom Lidgett', '1.2', 'Self Employed', '{"address":"55 Collins St Melbo…'],
+  ['EGzHeh5m8aYWIVCJmBaTV…', 'email', 'true', 'EGzHeh5m8aYWlVCJmBaTVvoM0gn1', 'didi@djd.com', 'F C', '1.2', 'Other', '{"longitude":144.9720411,"addre…'],
+  ['RPGYqEZI94a1m63177Jv3…', 'apple', 'null', 'RPGYqEZI94a1m63177Jv3fX1qjw2', 'tqygdksbp@privaterelay.com', 'Tom Lidgett', '1.2', 'null', '{"latitude":-37.8168958501177…'],
+  ['ZkPs76uZxpeKNpmsZNl58…', 'apple', 'true', 'ZkPs76uZxpeKNpmsZNl50kLMRAc2', 'tlidgett@me.com', 'Tom Lidgett', '1.2', 'Self Employed', '{"longitude":144.9720411,"upda…'],
+  ['kRVPQ5aE9dPpegdejaOcp…', 'email', 'true', 'kRVPQ5aE9dPpegdejaOcpJ9bKY03', 'sdf@sdffd.com', 'Sdf Sdf', '1.2', 'Other', '{"radius":10,"address":"223 Find…'],
 ]
 
 function CollectionsSlide() {
   return (
     <div className="flex flex-col h-full">
-      {/* Header — matches ProjectPage */}
+      {/* Header — matches CollectionExplorerPage */}
       <div className="bg-white border-b border-gray-200 px-4 h-10 flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1.5 min-w-0">
           <ChevronLeft size={14} className="text-gray-400" />
-          <div className="w-5 h-5 bg-fire-500 rounded-md flex items-center justify-center">
-            <Flame className="w-3 h-3 text-white" />
-          </div>
+          <img src="/logo.png" alt="Firegrid" className="w-5 h-5 rounded-md shrink-0" />
           <span className="font-semibold text-[11px] text-gray-900">Firegrid</span>
-          <span className="text-gray-300 mx-0.5">/</span>
+          <ChevronRight size={11} className="text-gray-300 shrink-0" />
           <div className="flex items-center gap-1">
-            <Database size={12} className="text-gray-400" />
-            <span className="text-[11px] text-gray-700 font-medium">my-saas-app</span>
-            <ChevronDown size={10} className="text-gray-400" />
+            <Database size={11} className="text-gray-400" />
+            <span className="text-[11px] text-gray-700 font-medium">tap-loyalty-fb6d0</span>
+            <ChevronDown size={9} className="text-gray-400" />
           </div>
+          <ChevronRight size={11} className="text-gray-300 shrink-0" />
+          <span className="text-[10px] font-medium text-gray-500">Explorer</span>
+          <ChevronRight size={11} className="text-gray-300 shrink-0" />
+          <span className="text-[11px] font-medium text-gray-900">customers</span>
         </div>
-        <div className="flex items-center gap-1.5">
-          <span className="text-[10px] text-gray-400">sarah@company.io</span>
-          <div className="w-5 h-5 rounded-full bg-gray-200 flex items-center justify-center text-[8px] text-gray-500 font-bold">SC</div>
+        <div className="flex items-center gap-1.5 shrink-0">
+          <div className="w-5 h-5 rounded-full bg-gray-200 flex items-center justify-center text-[8px] text-gray-500 font-bold">TL</div>
         </div>
       </div>
 
-      {/* Main content */}
-      <div className="flex-1 bg-gray-50 overflow-auto">
-        <div className="max-w-3xl mx-auto px-4 py-4">
-          {/* Page header */}
-          <div className="flex items-start justify-between mb-4">
-            <div>
-              <div className="flex items-center gap-1.5 text-[12px] font-semibold text-gray-900">
-                <Database size={14} className="text-gray-400" />
-                Collections
-              </div>
-              <p className="text-[10px] text-gray-400 mt-0.5">Browse collections and sub-collections.</p>
-            </div>
-            <div className="flex items-center gap-1.5 bg-white border border-gray-200 text-[10px] font-medium text-gray-700 rounded-md px-2.5 py-1.5 cursor-pointer hover:border-gray-300 transition-colors">
-              <Wand2 size={11} className="text-gray-500" />
-              Auto-Build
-              <span className="text-[8px] font-semibold uppercase tracking-wider text-gray-500 bg-gray-100 px-1 py-0.5 rounded-md">Beta</span>
-            </div>
-          </div>
-
-          {/* Collection cards */}
-          <div className="space-y-1.5">
-            {/* users — expanded */}
-            <div className="bg-white rounded-md border border-gray-200 overflow-hidden">
-              <div className="px-3 py-2.5 flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <FileText size={13} className="text-gray-400" />
-                  <span className="text-[11px] font-medium text-gray-900">users</span>
-                  <span className="text-[9px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-md">1,248+ docs</span>
-                </div>
-                <ChevronDown size={13} className="text-gray-400 rotate-180" />
-              </div>
-
-              {/* Expanded schema */}
-              <div className="border-t border-gray-100 px-3 py-3">
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-[9px] text-gray-400">{schemaFields.length} fields from 50 sampled docs</p>
-                  <div className="flex items-center gap-1 text-[10px] font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded-md cursor-pointer transition-colors">
-                    Build Table
-                    <ArrowRight size={10} />
-                  </div>
-                </div>
-
-                <div className="border border-gray-100 rounded-md overflow-hidden">
-                  <table className="w-full text-[9px]">
-                    <thead>
-                      <tr className="bg-gray-50 text-gray-500">
-                        <th className="text-left px-2.5 py-1.5 font-medium">Field</th>
-                        <th className="text-left px-2.5 py-1.5 font-medium">Type</th>
-                        <th className="text-left px-2.5 py-1.5 font-medium">Coverage</th>
-                        <th className="text-left px-2.5 py-1.5 font-medium">Sample</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-50">
-                      {schemaFields.map((f) => (
-                        <tr key={f.path} className="hover:bg-gray-50">
-                          <td className="px-2.5 py-1 font-mono text-gray-800">{f.path}</td>
-                          <td className="px-2.5 py-1">
-                            <span className="text-gray-500 bg-gray-100 px-1 py-0.5 rounded-md text-[8px]">{f.type}</span>
-                          </td>
-                          <td className="px-2.5 py-1">
-                            <div className="flex items-center gap-1.5">
-                              <div className="w-12 h-1 bg-gray-100 rounded-full overflow-hidden">
-                                <div className="h-full bg-gray-400 rounded-full" style={{ width: `${f.coverage}%` }} />
-                              </div>
-                              <span className="text-gray-400">{f.coverage}%</span>
-                            </div>
-                          </td>
-                          <td className="px-2.5 py-1 text-gray-400 truncate max-w-[120px]">{f.sample}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-
-                {/* Sub-collections */}
-                <div className="mt-3">
-                  <div className="flex items-center gap-1.5 mb-1.5">
-                    <FolderTree size={11} className="text-gray-400" />
-                    <span className="text-[9px] font-medium text-gray-700">Sub-collections</span>
-                    <span className="text-[8px] text-gray-400 bg-gray-100 px-1 py-0.5 rounded-md">discovered from sample documents</span>
-                  </div>
-                  {['profiles', 'preferences'].map((sub) => (
-                    <div key={sub} className="flex items-center justify-between bg-gray-50 rounded-md px-2.5 py-2 mb-1">
-                      <div className="flex items-center gap-1.5">
-                        <FolderTree size={11} className="text-gray-400" />
-                        <span className="text-[10px] font-medium text-gray-800">{sub}</span>
-                        <span className="text-[8px] text-gray-400 bg-gray-100 border border-gray-200 px-1 py-0.5 rounded-md flex items-center gap-0.5">
-                          <FolderTree size={7} />
-                          has sub-collections
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <div className="text-[9px] text-gray-500 hover:text-gray-700 hover:bg-gray-200 px-1.5 py-0.5 rounded-md cursor-pointer transition-colors flex items-center gap-0.5">
-                          <ChevronRight size={9} />
-                          Explore (2)
-                        </div>
-                        <div className="text-[9px] font-medium text-gray-600 bg-white border border-gray-200 hover:border-gray-300 px-2 py-0.5 rounded-md cursor-pointer transition-colors flex items-center gap-0.5">
-                          Build Table <ArrowRight size={8} />
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            {/* Other collections — collapsed */}
-            {[
-              { name: 'orders', docs: '5,621+ docs' },
-              { name: 'products', docs: '342+ docs' },
-              { name: 'sessions', docs: '89,200+ docs', hasSubs: true },
-              { name: 'analytics', docs: '12,400+ docs' },
-            ].map((coll) => (
-              <div key={coll.name} className="bg-white rounded-md border border-gray-200 px-3 py-2.5 flex items-center justify-between hover:bg-gray-50 cursor-pointer transition-colors">
-                <div className="flex items-center gap-2">
-                  <FileText size={13} className="text-gray-400" />
-                  <span className="text-[11px] font-medium text-gray-900">{coll.name}</span>
-                  <span className="text-[9px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-md">{coll.docs}</span>
-                  {coll.hasSubs && (
-                    <span className="text-[8px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-md flex items-center gap-0.5">
-                      <FolderTree size={8} />
-                      Has subcollections
-                    </span>
-                  )}
-                </div>
-                <ChevronDown size={13} className="text-gray-400" />
-              </div>
-            ))}
+      {/* Toolbar */}
+      <div className="bg-white border-b border-gray-200 px-4 h-9 flex items-center gap-3 shrink-0">
+        {/* Search */}
+        <div className="relative flex-1 max-w-[200px]">
+          <Search size={11} className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400" />
+          <div className="w-full pl-7 pr-3 py-1 text-[10px] border border-gray-200 rounded-md bg-gray-50 text-gray-400">
+            Search across all fields…
           </div>
         </div>
+
+        {/* Subcollections */}
+        <div className="flex items-center gap-1.5 px-2 py-1 text-[10px] font-medium rounded-md border border-gray-200 text-gray-600 cursor-pointer hover:border-gray-300 transition-colors">
+          <FolderOpen size={11} className="text-gray-400" />
+          Subcollections
+          <span className="text-[9px] bg-gray-200 text-gray-500 px-1 py-0.5 rounded-md">29</span>
+          <ChevronDown size={9} className="text-gray-400" />
+        </div>
+
+        {/* Right side */}
+        <div className="flex items-center gap-2 ml-auto shrink-0">
+          <span className="text-[10px] text-gray-400 tabular-nums">8 docs</span>
+          <div className="w-px h-4 bg-gray-200" />
+          <div className="flex items-center gap-1.5 bg-gray-900 text-white text-[10px] font-medium rounded-md px-2.5 py-1 cursor-pointer hover:bg-gray-800 transition-colors">
+            <Plus size={10} />
+            Add Document
+          </div>
+        </div>
+      </div>
+
+      {/* Table */}
+      <div className="flex-1 overflow-auto">
+        <table className="w-full text-[10px] border-separate border-spacing-0">
+          <thead className="sticky top-0 z-10">
+            <tr>
+              {explorerHeaders.map((h, i) => (
+                <th
+                  key={h}
+                  className={cn(
+                    'text-left px-3 py-2 font-medium text-[9px] uppercase tracking-wider text-gray-500 bg-gray-50 border-b border-gray-200 whitespace-nowrap',
+                    i === 0 && 'sticky left-0 z-20'
+                  )}
+                >
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {explorerRows.map((row, rowIdx) => (
+              <tr
+                key={rowIdx}
+                className={cn(
+                  'group',
+                  rowIdx % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'
+                )}
+              >
+                {row.map((cell, colIdx) => {
+                  // Make the 5th row, "email" column (colIdx=4) appear as being edited
+                  const isEditing = rowIdx === 4 && colIdx === 4
+                  const isIdCol = colIdx === 0
+
+                  return (
+                    <td
+                      key={colIdx}
+                      className={cn(
+                        'px-3 py-1.5 whitespace-nowrap border-b border-gray-100 max-w-[200px]',
+                        isIdCol
+                          ? 'text-gray-800 font-mono sticky left-0 z-[5] ' + (rowIdx % 2 === 0 ? 'bg-white' : 'bg-gray-50')
+                          : 'text-gray-600',
+                        isEditing && 'p-0'
+                      )}
+                    >
+                      {isEditing ? (
+                        <div className="px-1 py-0.5">
+                          <input
+                            type="text"
+                            defaultValue="didi@djd.com"
+                            readOnly
+                            className="w-full min-w-[140px] text-[10px] bg-white border-2 border-blue-400 rounded-md px-2 py-1 text-gray-900 focus:outline-none shadow-sm"
+                          />
+                        </div>
+                      ) : (
+                        <span className="truncate block max-w-[200px]">
+                          {cell === 'null' ? (
+                            <span className="text-gray-300">null</span>
+                          ) : cell === '' ? (
+                            <span className="text-gray-300"></span>
+                          ) : (
+                            cell
+                          )}
+                        </span>
+                      )}
+                    </td>
+                  )
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Footer — pagination */}
+      <div className="px-4 py-1.5 bg-white border-t border-gray-200 flex items-center justify-between shrink-0">
+        <span className="text-[10px] text-gray-500 tabular-nums">8 of 8 rows</span>
+        <div className="flex items-center gap-1">
+          <span className="text-[10px] text-gray-500 tabular-nums">1 / 1</span>
+        </div>
+        <div className="text-[10px] text-gray-500 border border-gray-200 rounded-md px-2 py-0.5">50 rows</div>
       </div>
     </div>
   )
@@ -689,13 +654,12 @@ const slides: Slide[] = ['collections', 'table', 'sql', 'dashboard']
 
 export default function ProductShowcase() {
   const [active, setActive] = useState<Slide>('collections')
-  const info = slideInfo[active]
 
   return (
-    <section className="py-8 md:py-12 px-6">
+    <section className="pt-6 pb-12 md:pb-16 px-6">
       <div className="max-w-5xl mx-auto">
-        {/* Tabs */}
-        <div className="flex justify-center mb-6">
+        {/* Tabs + caption */}
+        <div className="flex flex-col items-center mb-5">
           <div className="flex items-center bg-gray-100 p-0.5 rounded-md">
             {slides.map((slide) => {
               const Icon = slideIcons[slide]
@@ -712,31 +676,24 @@ export default function ProductShowcase() {
                   )}
                 >
                   <Icon size={15} />
-                  {slideInfo[slide].label}
+                  {slideLabels[slide]}
                 </button>
               )
             })}
           </div>
+          <AnimatePresence mode="wait">
+            <motion.p
+              key={active + '-caption'}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.15 }}
+              className="text-[13px] text-gray-400 mt-2.5"
+            >
+              {slideCaptions[active]}
+            </motion.p>
+          </AnimatePresence>
         </div>
-
-        {/* Title + description */}
-        <AnimatePresence mode="wait">
-          <motion.div
-            key={active + '-text'}
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
-            transition={{ duration: 0.2 }}
-            className="text-center max-w-lg mx-auto mb-6"
-          >
-            <h3 className="text-xl md:text-2xl font-bold text-gray-900">
-              {info.title}
-            </h3>
-            <p className="text-sm text-gray-400 mt-2 leading-relaxed">
-              {info.description}
-            </p>
-          </motion.div>
-        </AnimatePresence>
 
         {/* Browser frame */}
         <div className="rounded-md border border-gray-200 overflow-hidden shadow-xl shadow-gray-200/60">
@@ -757,7 +714,7 @@ export default function ProductShowcase() {
                   transition={{ duration: 0.15 }}
                   className="bg-white rounded-md px-4 py-1 text-[11px] text-gray-400 font-mono border border-gray-200"
                 >
-                  {active === 'collections' && 'firegrid.app/project/my-saas-app'}
+                  {active === 'collections' && 'firegrid.app/project/tap-loyalty-fb6d0/explore/customers'}
                   {active === 'table' && 'firegrid.app/project/my-saas-app/collection/users'}
                   {active === 'sql' && 'firegrid.app/query'}
                   {active === 'dashboard' && 'firegrid.app/dashboard-builder/weekly-overview'}
@@ -783,6 +740,7 @@ export default function ProductShowcase() {
             </motion.div>
           </AnimatePresence>
         </div>
+
       </div>
     </section>
   )

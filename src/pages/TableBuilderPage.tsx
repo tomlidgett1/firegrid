@@ -32,7 +32,6 @@ import {
 } from '@tanstack/react-table'
 import { motion, AnimatePresence, Reorder } from 'framer-motion'
 import {
-  Flame,
   ChevronLeft,
   ChevronDown,
   ChevronUp,
@@ -607,9 +606,7 @@ export default function TableBuilderPage() {
               <ChevronLeft size={16} />
             </button>
             <div className="flex items-center gap-1.5">
-              <div className="w-6 h-6 bg-fire-500 rounded-md flex items-center justify-center shrink-0">
-                <Flame className="w-3.5 h-3.5 text-white" />
-              </div>
+              <img src="/logo.png" alt="Firegrid" className="w-6 h-6 rounded-md shrink-0" />
               <span className="font-semibold text-sm text-gray-900 dark:text-gray-100">Firegrid</span>
             </div>
             <ChevronRight size={14} className="text-gray-300 dark:text-gray-600 shrink-0" />

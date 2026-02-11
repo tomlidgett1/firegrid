@@ -16,7 +16,6 @@ import {
   type ColumnDef,
 } from '@tanstack/react-table'
 import {
-  Flame,
   ChevronLeft,
   ChevronDown,
   ChevronUp,
@@ -189,9 +188,7 @@ export default function QueryTablePage() {
               <ChevronLeft size={18} />
             </button>
             <div className="flex items-center gap-2">
-              <div className="w-7 h-7 bg-fire-500 rounded-md flex items-center justify-center">
-                <Flame className="w-4 h-4 text-white" />
-              </div>
+              <img src="/logo.png" alt="Firegrid" className="w-7 h-7 rounded-md" />
               <span className="font-semibold text-gray-900 dark:text-gray-100">Firegrid</span>
             </div>
             <span className="text-gray-300 dark:text-gray-600">/</span>

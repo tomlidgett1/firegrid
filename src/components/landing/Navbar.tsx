@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Flame, Menu, X } from 'lucide-react'
+import { Menu, X } from 'lucide-react'
 
 export default function Navbar() {
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -11,9 +11,7 @@ export default function Navbar() {
       <div className="max-w-5xl mx-auto px-6 h-14 flex items-center justify-between">
         {/* Logo */}
         <Link to="/" className="flex items-center gap-2">
-          <div className="w-7 h-7 bg-fire-500 rounded-md flex items-center justify-center">
-            <Flame size={14} className="text-white" />
-          </div>
+          <img src="/logo.png" alt="Firegrid" className="w-7 h-7 rounded-md" />
           <span className="text-sm font-semibold text-gray-800">Firegrid</span>
         </Link>
 

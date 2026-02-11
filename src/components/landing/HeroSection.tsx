@@ -5,23 +5,22 @@ const container: Variants = {
   hidden: { opacity: 0 },
   visible: {
     opacity: 1,
-    transition: { staggerChildren: 0.12, delayChildren: 0.1 },
+    transition: { staggerChildren: 0.1, delayChildren: 0.1 },
   },
 }
 
 const item: Variants = {
-  hidden: { opacity: 0, y: 20 },
+  hidden: { opacity: 0, y: 14 },
   visible: {
     opacity: 1,
     y: 0,
-    transition: { duration: 0.6, ease: 'easeOut' },
+    transition: { duration: 0.5, ease: 'easeOut' },
   },
 }
 
 export default function HeroSection() {
   return (
-    <section className="relative flex flex-col items-center pt-36 md:pt-44 pb-8 px-6 overflow-hidden">
-      {/* Content */}
+    <section className="relative flex flex-col items-center pt-28 md:pt-36 pb-2 px-6 overflow-hidden">
       <motion.div
         variants={container}
         initial="hidden"
@@ -31,7 +30,7 @@ export default function HeroSection() {
         {/* Headline */}
         <motion.h1
           variants={item}
-          className="text-4xl sm:text-5xl md:text-6xl font-bold text-gray-900 tracking-tight leading-[1.1]"
+          className="text-4xl sm:text-5xl md:text-[56px] font-bold text-gray-900 tracking-tight leading-[1.08]"
         >
           Firestore data,{' '}
           <span className="bg-gradient-to-r from-fire-500 to-fire-600 bg-clip-text text-transparent">
@@ -39,31 +38,27 @@ export default function HeroSection() {
           </span>
         </motion.h1>
 
-        {/* Subheadline */}
+        {/* One-liner */}
         <motion.p
           variants={item}
-          className="text-base md:text-lg text-gray-400 max-w-lg mx-auto mt-5 leading-relaxed"
+          className="text-base text-gray-400 max-w-md mx-auto mt-4"
         >
-          Browse your collections, build custom tables, write SQL queries,
-          and create dashboards — all from your browser.
+          Explore, query, and dashboard your Firestore — entirely in the browser.
         </motion.p>
 
-        {/* CTA + meta */}
-        <motion.div variants={item} className="mt-8 flex flex-col items-center">
+        {/* CTA row */}
+        <motion.div variants={item} className="mt-6 flex items-center gap-3">
           <Link
             to="/login"
-            className="bg-gray-900 hover:bg-gray-800 text-white rounded-md px-7 py-3 text-sm font-medium transition-colors"
+            className="bg-gray-900 hover:bg-gray-800 text-white rounded-md px-6 py-2.5 text-sm font-medium transition-colors"
           >
             Get Started Free
           </Link>
-          <p className="text-[11px] text-gray-300 mt-3">
-            100% client-side · Your data never leaves your browser
-          </p>
           <a
             href="https://producthunt.com/posts/firegrid"
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-1.5 text-[11px] text-gray-400 hover:text-gray-600 transition-colors mt-2"
+            className="inline-flex items-center gap-1.5 text-sm text-gray-400 hover:text-gray-600 transition-colors border border-gray-200 rounded-md px-6 py-2.5"
           >
             <svg viewBox="0 0 40 40" className="w-3.5 h-3.5 shrink-0" fill="none">
               <path
@@ -75,9 +70,14 @@ export default function HeroSection() {
                 fill="#fff"
               />
             </svg>
-            View on Product Hunt
+            Product Hunt
           </a>
         </motion.div>
+
+        {/* Trust micro-text */}
+        <motion.p variants={item} className="text-[11px] text-gray-300 mt-3">
+          100% client-side · Your data never leaves your browser
+        </motion.p>
       </motion.div>
     </section>
   )

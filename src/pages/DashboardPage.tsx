@@ -6,7 +6,6 @@ import { collection, query, getDocs, doc, orderBy, updateDoc, addDoc, Timestamp,
 import { db } from '@/lib/firebase'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
-  Flame,
   Trash2,
   LogOut,
   Loader2,
@@ -342,9 +341,7 @@ export default function DashboardPage() {
         <div className="max-w-5xl mx-auto px-6 h-14 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-2">
-              <div className="w-7 h-7 bg-fire-500 rounded-md flex items-center justify-center">
-                <Flame className="w-4 h-4 text-white" />
-              </div>
+              <img src="/logo.png" alt="Firegrid" className="w-7 h-7 rounded-md" />
               <span className="font-semibold text-gray-900 dark:text-gray-100">Firegrid</span>
             </div>
             {hasConnectedProject && (
