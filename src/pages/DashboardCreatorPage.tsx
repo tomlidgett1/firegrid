@@ -5989,6 +5989,10 @@ function PivotCard({
     const startX = e.clientX
     resizingCol.current = { idx: colIdx, startX, startW }
 
+    // Prevent text selection while dragging
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+
     const onMove = (me: MouseEvent) => {
       if (!resizingCol.current) return
       const delta = me.clientX - resizingCol.current.startX
@@ -5997,6 +6001,8 @@ function PivotCard({
     }
     const onUp = () => {
       resizingCol.current = null
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
       window.removeEventListener('mousemove', onMove)
       window.removeEventListener('mouseup', onUp)
     }
@@ -6236,10 +6242,12 @@ function PivotCard({
                     </span>
                     {/* Column resize handle */}
                     <div
-                      className="absolute right-0 top-0 bottom-0 w-[5px] cursor-col-resize hover:bg-gray-300/50 active:bg-gray-400/50 z-10"
+                      className="absolute right-[-4px] top-0 bottom-0 w-[9px] cursor-col-resize z-20 group/resize"
                       onMouseDown={(e) => startColResize(ri, e)}
                       onDoubleClick={(e) => { e.stopPropagation(); setColWidths((prev) => { const next = { ...prev }; delete next[ri]; return next }) }}
-                    />
+                    >
+                      <div className="absolute left-1/2 -translate-x-1/2 top-1 bottom-1 w-[2px] rounded-full bg-gray-300 opacity-0 group-hover/resize:opacity-100 transition-opacity" />
+                    </div>
                   </th>
                 ))}
                 {pivotData.headers.map((h, i) => {
@@ -6309,10 +6317,12 @@ function PivotCard({
                       )}
                       {/* Column resize handle */}
                       <div
-                        className="absolute right-0 top-0 bottom-0 w-[5px] cursor-col-resize hover:bg-gray-300/50 active:bg-gray-400/50 z-10"
+                        className="absolute right-[-4px] top-0 bottom-0 w-[9px] cursor-col-resize z-20 group/resize"
                         onMouseDown={(e) => startColResize(ci, e)}
                         onDoubleClick={(e) => { e.stopPropagation(); setColWidths((prev) => { const next = { ...prev }; delete next[ci]; return next }) }}
-                      />
+                      >
+                        <div className="absolute left-1/2 -translate-x-1/2 top-1 bottom-1 w-[2px] rounded-full bg-gray-300 opacity-0 group-hover/resize:opacity-100 transition-opacity" />
+                      </div>
                     </th>
                   )
                 })}
