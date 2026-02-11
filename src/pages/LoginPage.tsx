@@ -51,7 +51,7 @@ export default function LoginPage() {
       {/* Content */}
       <div className="relative z-10 flex flex-col items-center">
         {/* Icon */}
-        <img src="/logo.png" alt="Firegrid" className="w-12 h-12 rounded-md mb-6" />
+        <img src="/logo.png" alt="Firegrid" className="w-12 h-12 rounded-md mb-6 cursor-pointer" onClick={() => navigate('/')} />
 
         {/* Name */}
         <h1 className="text-3xl font-bold text-white tracking-tight mb-2">

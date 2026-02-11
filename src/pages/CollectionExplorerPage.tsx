@@ -790,10 +790,10 @@ export default function CollectionExplorerPage() {
               >
                 <ChevronLeft size={16} />
               </button>
-              <div className="flex items-center gap-1.5">
+              <button onClick={() => navigate('/dashboard')} className="flex items-center gap-1.5 cursor-pointer">
                 <img src="/logo.png" alt="Firegrid" className="w-6 h-6 rounded-md shrink-0" />
                 <span className="font-semibold text-sm text-gray-900 dark:text-gray-100">Firegrid</span>
-              </div>
+              </button>
               <ChevronRight size={14} className="text-gray-300 dark:text-gray-600 shrink-0" />
               <ProjectSwitcher currentProjectId={projectId} />
               <ChevronRight size={14} className="text-gray-300 dark:text-gray-600 shrink-0" />
@@ -924,10 +924,10 @@ export default function CollectionExplorerPage() {
             >
               <ChevronLeft size={16} />
             </button>
-            <div className="flex items-center gap-1.5">
+            <button onClick={() => navigate('/dashboard')} className="flex items-center gap-1.5 cursor-pointer">
               <img src="/logo.png" alt="Firegrid" className="w-6 h-6 rounded-md shrink-0" />
               <span className="font-semibold text-sm text-gray-900 dark:text-gray-100">Firegrid</span>
-            </div>
+            </button>
             <ChevronRight size={14} className="text-gray-300 dark:text-gray-600 shrink-0" />
             <ProjectSwitcher currentProjectId={projectId} />
             <ChevronRight size={14} className="text-gray-300 dark:text-gray-600 shrink-0" />

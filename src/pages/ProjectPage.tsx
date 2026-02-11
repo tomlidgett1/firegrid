@@ -291,10 +291,10 @@ export default function ProjectPage() {
             >
               <ChevronLeft size={18} />
             </button>
-            <div className="flex items-center gap-2">
+            <button onClick={() => navigate('/dashboard')} className="flex items-center gap-2 cursor-pointer">
               <img src="/logo.png" alt="Firegrid" className="w-7 h-7 rounded-md" />
               <span className="font-semibold text-gray-900 dark:text-gray-100">Firegrid</span>
-            </div>
+            </button>
             <span className="text-gray-300 dark:text-gray-600">/</span>
             <ProjectSwitcher currentProjectId={projectId} />
           </div>

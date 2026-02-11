@@ -340,10 +340,10 @@ export default function DashboardPage() {
       <header className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
         <div className="max-w-5xl mx-auto px-6 h-14 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2">
+            <button onClick={() => navigate('/dashboard')} className="flex items-center gap-2 cursor-pointer">
               <img src="/logo.png" alt="Firegrid" className="w-7 h-7 rounded-md" />
               <span className="font-semibold text-gray-900 dark:text-gray-100">Firegrid</span>
-            </div>
+            </button>
             {hasConnectedProject && (
               <>
                 <span className="text-gray-300 dark:text-gray-600">/</span>

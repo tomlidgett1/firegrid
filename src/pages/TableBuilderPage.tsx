@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, useCallback } from 'react'
+import { useEffect, useState, useMemo, useCallback, useRef } from 'react'
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
 import {
@@ -18,7 +18,7 @@ import {
 import type { FieldInfo, DocumentData, ColumnConfig, SavedTable } from '@/lib/types'
 import { db } from '@/lib/firebase'
 import { trackTableSaved, trackPageView } from '@/lib/metrics'
-import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore'
+import { doc, getDoc, setDoc, serverTimestamp, collection, query, getDocs, orderBy } from 'firebase/firestore'
 import {
   useReactTable,
   getCoreRowModel,
@@ -55,6 +55,7 @@ import {
   Eye,
   Settings2,
   GripVertical,
+  Table,
 } from 'lucide-react'
 import ProjectSwitcher from '@/components/ProjectSwitcher'
 import DarkModeToggle from '@/components/DarkModeToggle'
@@ -226,6 +227,12 @@ export default function TableBuilderPage() {
   const [copied, setCopied] = useState(false)
   const [colSearch, setColSearch] = useState('')
 
+  // Table switcher state
+  const [savedTables, setSavedTables] = useState<SavedTable[]>([])
+  const [showTableSwitcher, setShowTableSwitcher] = useState(false)
+  const [tableSearch, setTableSearch] = useState('')
+  const tableSwitcherRef = useRef<HTMLDivElement>(null)
+
   // Schema lookup for coverage
   const schemaMap = useMemo(() => {
     const map = new Map<string, FieldInfo>()
@@ -250,6 +257,47 @@ export default function TableBuilderPage() {
       trackPageView(user.uid, 'table_builder', { projectId, collectionPath })
     }
   }, [user?.uid, projectId, collectionPath])
+
+  // Fetch all saved tables for the switcher dropdown
+  const [savedTablesVersion, setSavedTablesVersion] = useState(0)
+  useEffect(() => {
+    if (!user?.uid || !db) return
+    const tablesRef = collection(db, 'users', user.uid, 'tables')
+    const q = query(tablesRef, orderBy('updatedAt', 'desc'))
+    getDocs(q)
+      .then((snap) => {
+        const tables = snap.docs
+          .map((d) => {
+            const data = d.data()
+            return {
+              id: d.id,
+              ...data,
+              createdAt: data.createdAt?.toDate?.() ?? new Date(),
+              updatedAt: data.updatedAt?.toDate?.() ?? new Date(),
+            } as SavedTable
+          })
+          .filter((t) => !t.querySql && !(t as any).archived) // exclude query tables & archived
+        setSavedTables(tables)
+      })
+      .catch(console.error)
+  }, [user?.uid, savedTablesVersion]) // refetch via explicit version bump
+
+  // Keep currentTableId in sync with URL (for browser back/forward)
+  useEffect(() => {
+    setCurrentTableId(tableId)
+  }, [tableId])
+
+  // Close table switcher on outside click
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (tableSwitcherRef.current && !tableSwitcherRef.current.contains(e.target as Node)) {
+        setShowTableSwitcher(false)
+        setTableSearch('')
+      }
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [])
 
   // Load saved table config if tableId is provided
   useEffect(() => {
@@ -450,6 +498,52 @@ export default function TableBuilderPage() {
     )
   }, [columns, colSearch])
 
+  // Filtered saved tables for the switcher
+  const filteredSavedTables = useMemo(() => {
+    if (!tableSearch.trim()) return savedTables
+    const q = tableSearch.toLowerCase()
+    return savedTables.filter(
+      (t) =>
+        t.tableName.toLowerCase().includes(q) ||
+        t.collectionPath.toLowerCase().includes(q) ||
+        t.projectId.toLowerCase().includes(q)
+    )
+  }, [savedTables, tableSearch])
+
+  // Switch to a different saved table — update state directly, no full navigation
+  const switchToTable = useCallback(
+    (t: SavedTable) => {
+      setShowTableSwitcher(false)
+      setTableSearch('')
+
+      // Immediately apply the saved table's config
+      setTableName(t.tableName)
+      setColumns(t.columns)
+      setCurrentTableId(t.id)
+      setMode('view')
+
+      const sameCollection =
+        t.projectId === projectId &&
+        t.collectionPath === collectionPath &&
+        (!!t.isCollectionGroup === isCollectionGroup)
+
+      if (sameCollection) {
+        // Same data — just update the URL search params (no data refetch)
+        const params = new URLSearchParams(searchParams)
+        params.set('tableId', t.id)
+        params.set('mode', 'view')
+        setSearchParams(params, { replace: true })
+      } else {
+        // Different collection — navigate to load new data, but columns/name are already set
+        navigate(
+          `/project/${t.projectId}/collection/${encodeURIComponent(t.collectionPath)}?tableId=${t.id}&mode=view${t.isCollectionGroup ? '&group=true' : ''}`,
+          { replace: true }
+        )
+      }
+    },
+    [navigate, projectId, collectionPath, isCollectionGroup, searchParams, setSearchParams]
+  )
+
   // ---- TanStack Table ----
 
   const tableColumns = useMemo<ColumnDef<Record<string, unknown>>[]>(
@@ -526,6 +620,9 @@ export default function TableBuilderPage() {
 
       setSaved(true)
 
+      // Refresh the saved tables list in the switcher
+      setSavedTablesVersion((v) => v + 1)
+
       // Switch to view mode after saving
       setTimeout(() => {
         setMode('view')
@@ -562,7 +659,11 @@ export default function TableBuilderPage() {
 
   // ---- Render ----
 
-  if (loading) {
+  // Has data been loaded at least once? (columns set from save or schema discovery)
+  const hasLoadedOnce = columns.length > 0 || flatDocs.length > 0
+
+  // Full-page spinner only on the very first load
+  if (loading && !hasLoadedOnce) {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
         <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
@@ -573,7 +674,8 @@ export default function TableBuilderPage() {
     )
   }
 
-  if (error) {
+  // Full-page error only on the very first load
+  if (error && !hasLoadedOnce) {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
         <div className="bg-white dark:bg-gray-800 rounded-md border border-red-200 dark:border-red-800 p-6 max-w-md">
@@ -605,10 +707,10 @@ export default function TableBuilderPage() {
             >
               <ChevronLeft size={16} />
             </button>
-            <div className="flex items-center gap-1.5">
+            <button onClick={() => navigate('/dashboard')} className="flex items-center gap-1.5 cursor-pointer">
               <img src="/logo.png" alt="Firegrid" className="w-6 h-6 rounded-md shrink-0" />
               <span className="font-semibold text-sm text-gray-900 dark:text-gray-100">Firegrid</span>
-            </div>
+            </button>
             <ChevronRight size={14} className="text-gray-300 dark:text-gray-600 shrink-0" />
             <ProjectSwitcher currentProjectId={projectId} />
             <ChevronRight size={14} className="text-gray-300 dark:text-gray-600 shrink-0" />
@@ -684,6 +786,119 @@ export default function TableBuilderPage() {
               </button>
             )}
           </div>
+
+          {/* Table switcher dropdown */}
+          {savedTables.length > 0 && (
+            <div className="relative" ref={tableSwitcherRef}>
+              <button
+                onClick={() => {
+                  setShowTableSwitcher(!showTableSwitcher)
+                  setTableSearch('')
+                }}
+                className={cn(
+                  'flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-md transition-colors border max-w-[200px]',
+                  showTableSwitcher
+                    ? 'text-gray-800 bg-gray-50 border-gray-300 dark:text-gray-200 dark:bg-gray-700 dark:border-gray-500'
+                    : 'text-gray-600 bg-white border-gray-200 hover:border-gray-300 hover:bg-gray-50 dark:text-gray-300 dark:bg-gray-800 dark:border-gray-600 dark:hover:bg-gray-700'
+                )}
+              >
+                <Table size={13} className="shrink-0 text-gray-400" />
+                <span className="truncate">
+                  {tableName || 'Unsaved table'}
+                </span>
+                <ChevronDown
+                  className={cn(
+                    'h-3 w-3 shrink-0 text-gray-400 transition-transform duration-200',
+                    showTableSwitcher && 'rotate-180'
+                  )}
+                />
+              </button>
+
+              <AnimatePresence>
+                {showTableSwitcher && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.4, ease: [0.04, 0.62, 0.23, 0.98] }}
+                    className="absolute top-full left-0 mt-1 w-72 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md shadow-lg z-50 overflow-hidden"
+                  >
+                    {/* Search */}
+                    <div className="p-2 border-b border-gray-100 dark:border-gray-700">
+                      <div className="relative">
+                        <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400" />
+                        <input
+                          type="text"
+                          placeholder="Search tables…"
+                          value={tableSearch}
+                          onChange={(e) => setTableSearch(e.target.value)}
+                          autoFocus
+                          className="w-full pl-7 pr-3 py-1.5 text-xs border border-gray-200 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-gray-200 focus:border-gray-300 bg-gray-50 dark:bg-gray-700 dark:text-gray-100"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Table list */}
+                    <div className="max-h-64 overflow-y-auto py-1">
+                      {filteredSavedTables.length === 0 ? (
+                        <div className="px-3 py-4 text-center text-xs text-gray-400">
+                          {tableSearch ? `No tables matching "${tableSearch}"` : 'No saved tables'}
+                        </div>
+                      ) : (
+                        filteredSavedTables.map((t) => {
+                          const isCurrentTable = t.id === currentTableId
+                          return (
+                            <button
+                              key={t.id}
+                              onClick={() => {
+                                if (!isCurrentTable) switchToTable(t)
+                                else {
+                                  setShowTableSwitcher(false)
+                                  setTableSearch('')
+                                }
+                              }}
+                              className={cn(
+                                'w-full text-left px-3 py-2 flex items-start gap-2.5 transition-colors',
+                                isCurrentTable
+                                  ? 'bg-gray-50 dark:bg-gray-700/50'
+                                  : 'hover:bg-gray-50 dark:hover:bg-gray-700/30'
+                              )}
+                            >
+                              <Table size={13} className={cn(
+                                'shrink-0 mt-0.5',
+                                isCurrentTable ? 'text-gray-700 dark:text-gray-200' : 'text-gray-300 dark:text-gray-600'
+                              )} />
+                              <div className="flex-1 min-w-0">
+                                <div className={cn(
+                                  'text-xs font-medium truncate',
+                                  isCurrentTable
+                                    ? 'text-gray-900 dark:text-gray-100'
+                                    : 'text-gray-700 dark:text-gray-300'
+                                )}>
+                                  {t.tableName}
+                                </div>
+                                <div className="text-[10px] text-gray-400 dark:text-gray-500 truncate mt-0.5">
+                                  {t.projectId} / {t.collectionPath}
+                                </div>
+                              </div>
+                              {isCurrentTable && (
+                                <Check size={13} className="shrink-0 mt-0.5 text-gray-500 dark:text-gray-400" />
+                              )}
+                            </button>
+                          )
+                        })
+                      )}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          )}
+
+          {/* Divider between switcher and search */}
+          {savedTables.length > 0 && (
+            <div className="w-px h-5 bg-gray-200 dark:bg-gray-600" />
+          )}
 
           {/* Centre: Search */}
           <div className="relative flex-1 max-w-md">
@@ -880,7 +1095,31 @@ export default function TableBuilderPage() {
         </AnimatePresence>
 
         {/* ======== Main Table Area ======== */}
-        <div className="flex-1 flex flex-col overflow-hidden">
+        <div className="flex-1 flex flex-col overflow-hidden relative">
+          {/* Inline loading overlay for table switches */}
+          {loading && hasLoadedOnce && (
+            <div className="absolute inset-0 z-20 bg-gray-50/80 dark:bg-gray-900/80 backdrop-blur-[1px] flex items-center justify-center">
+              <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-800 px-4 py-2.5 rounded-md border border-gray-200 dark:border-gray-700 shadow-sm">
+                <Loader2 size={14} className="animate-spin" />
+                Loading collection data…
+              </div>
+            </div>
+          )}
+
+          {/* Inline error banner for table switches */}
+          {error && hasLoadedOnce && (
+            <div className="mx-4 mt-3 bg-white dark:bg-gray-800 rounded-md border border-red-200 dark:border-red-800 p-3 flex items-center gap-2.5">
+              <AlertCircle size={14} className="text-red-500 dark:text-red-400 shrink-0" />
+              <p className="text-xs text-red-600 dark:text-red-400 flex-1">{error}</p>
+              <button
+                onClick={() => setError(null)}
+                className="p-0.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 rounded hover:bg-gray-100 dark:hover:bg-gray-700"
+              >
+                <X size={12} />
+              </button>
+            </div>
+          )}
+
           {/* Table */}
           <div className="flex-1 overflow-auto">
             {visibleCount === 0 ? (
