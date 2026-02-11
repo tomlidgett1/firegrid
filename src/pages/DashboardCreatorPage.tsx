@@ -2827,7 +2827,7 @@ function WidgetCard({
             </button>
           </div>
         ) : previewCols.length > 0 ? (
-          <div className="overflow-auto h-full">
+          <div className="overflow-auto h-full px-3">
             <table className="w-full text-[11px]">
               <thead className="sticky top-0 z-10">
                 <tr className="bg-gray-50">
@@ -6555,7 +6555,7 @@ function PivotCard({
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-auto">
+      <div className="flex-1 overflow-auto px-3">
         {loading ? (
           <div className="flex items-center justify-center h-full gap-2 text-xs text-gray-400">
             <Loader2 size={14} className="animate-spin" />Loading…
