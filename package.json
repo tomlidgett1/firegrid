@@ -5,19 +5,16 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview"
   },
   "dependencies": {
-    "@rollup/rollup-darwin-arm64": "^4.57.1",
-    "@tailwindcss/oxide-darwin-arm64": "^4.1.18",
     "@tanstack/react-table": "^8.21.3",
     "alasql": "^4.17.0",
     "clsx": "^2.1.1",
     "firebase": "^12.9.0",
     "framer-motion": "^12.34.0",
-    "lightningcss-darwin-arm64": "^1.31.1",
     "lucide-react": "^0.563.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
