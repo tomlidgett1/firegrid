@@ -52,6 +52,11 @@ import {
   Paintbrush,
   ToggleLeft,
   ToggleRight,
+  Hash,
+  DollarSign,
+  Percent,
+  Calendar,
+  CaseSensitive,
 } from 'lucide-react'
 import {
   BarChart,
@@ -1363,6 +1368,7 @@ export default function DashboardCreatorPage() {
                             )
                           }
                         }}
+                        onColumnFormatsChange={(fmts) => updateWidgetColumnFormats(widget.i, fmts)}
                       />
                     )
                   }
@@ -1416,6 +1422,7 @@ export default function DashboardCreatorPage() {
                         onOpenConfig={() => setConfiguringWidgetId(widget.i)}
                         onDisplayNameChange={(name) => updateWidgetDisplayName(widget.i, name)}
                         onPivotConfigChange={(config) => updateWidgetPivotConfig(widget.i, config)}
+                        onColumnFormatsChange={(fmts) => updateWidgetColumnFormats(widget.i, fmts)}
                       />
                     )
                   }
@@ -2020,6 +2027,7 @@ function WidgetCard({
   onColumnOrderChange,
   onOpenConfig,
   onOpenTable,
+  onColumnFormatsChange,
 }: {
   widget: DashboardWidget
   table: SavedTable | undefined
@@ -2036,6 +2044,7 @@ function WidgetCard({
   onColumnOrderChange: (order: string[]) => void
   onOpenConfig: () => void
   onOpenTable: () => void
+  onColumnFormatsChange: (formats: Record<string, ColumnFormat>) => void
 }) {
   const [rows, setRows] = useState<Record<string, unknown>[]>([])
   const [loading, setLoading] = useState(false)
@@ -2060,6 +2069,27 @@ function WidgetCard({
 
   // Column context menu state
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; colKey: string; displayName: string } | null>(null)
+
+  // Quick column format toolbar state
+  const [formatToolbarCol, setFormatToolbarCol] = useState<string | null>(null)
+  const [formatToolbarRect, setFormatToolbarRect] = useState<{ top: number; left: number; width: number; bottom: number } | null>(null)
+
+  const openFormatToolbar = useCallback((colKey: string, thElement: HTMLElement) => {
+    const rect = thElement.getBoundingClientRect()
+    setFormatToolbarRect({ top: rect.top, left: rect.left, width: rect.width, bottom: rect.bottom })
+    setFormatToolbarCol(colKey)
+  }, [])
+
+  const handleFormatApply = useCallback((colKey: string, fmt: ColumnFormat | null) => {
+    const prev = widget.columnFormats || {}
+    if (fmt === null) {
+      const next = { ...prev }
+      delete next[colKey]
+      onColumnFormatsChange(next)
+    } else {
+      onColumnFormatsChange({ ...prev, [colKey]: fmt })
+    }
+  }, [widget.columnFormats, onColumnFormatsChange])
 
   // Fetch live data for this widget
   useEffect(() => {
@@ -2456,6 +2486,33 @@ function WidgetCard({
                             ) : (
                               <ArrowUpDown size={10} className="text-gray-300 opacity-0 group-hover/th:opacity-100 transition-opacity" />
                             )}
+                            {editMode && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  const th = (e.currentTarget as HTMLElement).closest('th')
+                                  if (th) openFormatToolbar(colKey, th)
+                                }}
+                                onMouseDown={(e) => e.stopPropagation()}
+                                className={cn(
+                                  'ml-0.5 p-0.5 rounded transition-all cursor-pointer',
+                                  widget.columnFormats?.[colKey]
+                                    ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-200/50'
+                                    : 'text-gray-300 opacity-0 group-hover/th:opacity-100 hover:text-gray-500 hover:bg-gray-200/50'
+                                )}
+                                title="Format column"
+                              >
+                                {(() => {
+                                  const ft = widget.columnFormats?.[colKey]?.type
+                                  if (ft === 'number') return <Hash size={9} />
+                                  if (ft === 'currency') return <DollarSign size={9} />
+                                  if (ft === 'percent') return <Percent size={9} />
+                                  if (ft === 'date' || ft === 'datetime') return <Calendar size={9} />
+                                  if (ft === 'text') return <CaseSensitive size={9} />
+                                  return <Paintbrush size={9} />
+                                })()}
+                              </button>
+                            )}
                           </span>
                         )}
                       </th>
@@ -2535,6 +2592,17 @@ function WidgetCard({
           sortDir={sortDir}
           onAction={(action) => handleColumnContextAction(action, contextMenu.colKey, contextMenu.displayName)}
           onClose={() => setContextMenu(null)}
+        />
+      )}
+
+      {/* Quick Column Format Toolbar */}
+      {editMode && formatToolbarCol && formatToolbarRect && (
+        <ColumnFormatToolbar
+          colKey={formatToolbarCol}
+          currentFormat={widget.columnFormats?.[formatToolbarCol]}
+          anchorRect={formatToolbarRect}
+          onApply={handleFormatApply}
+          onClose={() => { setFormatToolbarCol(null); setFormatToolbarRect(null) }}
         />
       )}
 
@@ -3986,6 +4054,163 @@ function ColumnFormattingSection({
         )}
       </AnimatePresence>
     </div>
+  )
+}
+
+/* ───────── Quick Column Format Toolbar (floating popover) ───────── */
+
+const QUICK_FORMATS: { type: ColFormatType; icon: React.ReactNode; label: string; defaults?: Partial<ColumnFormat> }[] = [
+  { type: 'auto', icon: <Wand2 size={12} />, label: 'Auto' },
+  { type: 'number', icon: <Hash size={12} />, label: 'Number', defaults: { decimals: 2, thousandSep: true } },
+  { type: 'currency', icon: <DollarSign size={12} />, label: 'Currency', defaults: { decimals: 2, currency: 'USD' } },
+  { type: 'percent', icon: <Percent size={12} />, label: 'Percent', defaults: { decimals: 1 } },
+  { type: 'date', icon: <Calendar size={12} />, label: 'Date', defaults: { dateFormat: 'medium' } },
+  { type: 'text', icon: <CaseSensitive size={12} />, label: 'Text' },
+]
+
+function ColumnFormatToolbar({
+  colKey,
+  currentFormat,
+  anchorRect,
+  onApply,
+  onClose,
+}: {
+  colKey: string
+  currentFormat: ColumnFormat | undefined
+  anchorRect: { top: number; left: number; width: number; bottom: number }
+  onApply: (colKey: string, format: ColumnFormat | null) => void
+  onClose: () => void
+}) {
+  const toolbarRef = useRef<HTMLDivElement>(null)
+  const currentType = currentFormat?.type ?? 'auto'
+
+  // Close on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (toolbarRef.current && !toolbarRef.current.contains(e.target as Node)) {
+        onClose()
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [onClose])
+
+  // Close on Escape
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    document.addEventListener('keydown', handler)
+    return () => document.removeEventListener('keydown', handler)
+  }, [onClose])
+
+  const handleSelect = (qf: typeof QUICK_FORMATS[number]) => {
+    if (qf.type === 'auto') {
+      onApply(colKey, null) // remove format
+    } else {
+      onApply(colKey, { type: qf.type, ...qf.defaults } as ColumnFormat)
+    }
+    onClose()
+  }
+
+  // Decimals quick adjust for current format
+  const showDecimals = currentFormat && ['number', 'currency', 'percent'].includes(currentFormat.type)
+  const currentDecimals = currentFormat?.decimals ?? 2
+
+  const adjustDecimals = (delta: number) => {
+    const newDec = Math.max(0, Math.min(10, currentDecimals + delta))
+    onApply(colKey, { ...currentFormat!, decimals: newDec })
+  }
+
+  // Currency quick switch
+  const showCurrency = currentFormat?.type === 'currency'
+
+  return createPortal(
+    <div
+      ref={toolbarRef}
+      className="fixed z-[9999] animate-in slide-in-from-top-1 fade-in duration-150"
+      style={{
+        top: anchorRect.bottom + 4,
+        left: anchorRect.left,
+      }}
+      onMouseDown={(e) => e.stopPropagation()}
+    >
+      <div className="bg-white border border-gray-200 rounded-md shadow-lg p-1 flex flex-col gap-1" style={{ minWidth: 200 }}>
+        {/* Quick format buttons */}
+        <div className="flex items-center gap-0.5">
+          {QUICK_FORMATS.map((qf) => (
+            <button
+              key={qf.type}
+              onClick={() => handleSelect(qf)}
+              className={cn(
+                'flex items-center gap-1 px-2 py-1.5 text-[10px] font-medium rounded-md transition-colors cursor-pointer',
+                currentType === qf.type
+                  ? 'text-gray-800 bg-gray-100'
+                  : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+              )}
+              title={qf.label}
+            >
+              {qf.icon}
+            </button>
+          ))}
+        </div>
+
+        {/* Decimals adjuster */}
+        {showDecimals && (
+          <div className="flex items-center justify-between px-1 py-0.5 border-t border-gray-100">
+            <span className="text-[9px] text-gray-400 uppercase tracking-wider">Decimals</span>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => adjustDecimals(-1)}
+                disabled={currentDecimals <= 0}
+                className="w-5 h-5 flex items-center justify-center text-[10px] font-medium text-gray-500 hover:bg-gray-100 rounded cursor-pointer disabled:opacity-30 disabled:cursor-default"
+              >
+                −
+              </button>
+              <span className="text-[10px] font-medium text-gray-700 w-4 text-center tabular-nums">{currentDecimals}</span>
+              <button
+                onClick={() => adjustDecimals(1)}
+                disabled={currentDecimals >= 10}
+                className="w-5 h-5 flex items-center justify-center text-[10px] font-medium text-gray-500 hover:bg-gray-100 rounded cursor-pointer disabled:opacity-30 disabled:cursor-default"
+              >
+                +
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Currency quick switch */}
+        {showCurrency && (
+          <div className="flex items-center justify-between px-1 py-0.5 border-t border-gray-100">
+            <span className="text-[9px] text-gray-400 uppercase tracking-wider">Currency</span>
+            <select
+              value={currentFormat?.currency || 'USD'}
+              onChange={(e) => onApply(colKey, { ...currentFormat!, currency: e.target.value })}
+              className="text-[10px] border border-gray-200 rounded px-1 py-0.5 text-gray-700 bg-white focus:outline-none focus:border-gray-400 cursor-pointer"
+            >
+              {CURRENCY_OPTIONS.map((c) => (
+                <option key={c.code} value={c.code}>{c.label}</option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {/* Date style quick switch */}
+        {currentFormat && (currentFormat.type === 'date' || currentFormat.type === 'datetime') && (
+          <div className="flex items-center justify-between px-1 py-0.5 border-t border-gray-100">
+            <span className="text-[9px] text-gray-400 uppercase tracking-wider">Style</span>
+            <select
+              value={currentFormat.dateFormat || 'medium'}
+              onChange={(e) => onApply(colKey, { ...currentFormat, dateFormat: e.target.value })}
+              className="text-[10px] border border-gray-200 rounded px-1 py-0.5 text-gray-700 bg-white focus:outline-none focus:border-gray-400 cursor-pointer"
+            >
+              {DATE_FORMAT_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+          </div>
+        )}
+      </div>
+    </div>,
+    document.body
   )
 }
 
@@ -5501,6 +5726,7 @@ function PivotCard({
   onOpenConfig,
   onDisplayNameChange,
   onPivotConfigChange,
+  onColumnFormatsChange,
 }: {
   widget: DashboardWidget
   savedTables: SavedTable[]
@@ -5511,6 +5737,7 @@ function PivotCard({
   onOpenConfig: () => void
   onDisplayNameChange: (name: string) => void
   onPivotConfigChange: (config: PivotConfig) => void
+  onColumnFormatsChange: (formats: Record<string, ColumnFormat>) => void
 }) {
   const config = widget.pivotConfig
   const [rows, setRows] = useState<Record<string, unknown>[]>([])
@@ -5531,6 +5758,27 @@ function PivotCard({
   const [colWidths, setColWidths] = useState<Record<number, number>>({})
   const resizingCol = useRef<{ idx: number; startX: number; startW: number } | null>(null)
   const thRefs = useRef<Map<number, HTMLTableCellElement>>(new Map())
+
+  // Quick column format toolbar state
+  const [pivotFmtCol, setPivotFmtCol] = useState<string | null>(null)
+  const [pivotFmtRect, setPivotFmtRect] = useState<{ top: number; left: number; width: number; bottom: number } | null>(null)
+
+  const openPivotFmtToolbar = useCallback((colKey: string, thElement: HTMLElement) => {
+    const rect = thElement.getBoundingClientRect()
+    setPivotFmtRect({ top: rect.top, left: rect.left, width: rect.width, bottom: rect.bottom })
+    setPivotFmtCol(colKey)
+  }, [])
+
+  const handlePivotFmtApply = useCallback((colKey: string, fmt: ColumnFormat | null) => {
+    const prev = widget.columnFormats || {}
+    if (fmt === null) {
+      const next = { ...prev }
+      delete next[colKey]
+      onColumnFormatsChange(next)
+    } else {
+      onColumnFormatsChange({ ...prev, [colKey]: fmt })
+    }
+  }, [widget.columnFormats, onColumnFormatsChange])
 
   const startColResize = useCallback((colIdx: number, e: React.MouseEvent) => {
     e.preventDefault()
@@ -5755,9 +6003,38 @@ function PivotCard({
                   <th
                     key={rh}
                     ref={(el) => { if (el) thRefs.current.set(ri, el); else thRefs.current.delete(ri) }}
-                    className="text-left px-2.5 py-2 text-[10px] font-semibold text-gray-500 border-b border-r border-gray-200 sticky top-0 bg-gray-50 relative select-none overflow-hidden text-ellipsis whitespace-nowrap"
+                    className="text-left px-2.5 py-2 text-[10px] font-semibold text-gray-500 border-b border-r border-gray-200 sticky top-0 bg-gray-50 relative select-none overflow-hidden text-ellipsis whitespace-nowrap group/th"
                   >
-                    {rh}
+                    <span className="inline-flex items-center gap-1">
+                      {rh}
+                      {editMode && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            const th = (e.currentTarget as HTMLElement).closest('th')
+                            if (th) openPivotFmtToolbar(rh, th)
+                          }}
+                          onMouseDown={(e) => e.stopPropagation()}
+                          className={cn(
+                            'p-0.5 rounded transition-all cursor-pointer',
+                            widget.columnFormats?.[rh]
+                              ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-200/50'
+                              : 'text-gray-300 opacity-0 group-hover/th:opacity-100 hover:text-gray-500 hover:bg-gray-200/50'
+                          )}
+                          title="Format column"
+                        >
+                          {(() => {
+                            const ft = widget.columnFormats?.[rh]?.type
+                            if (ft === 'number') return <Hash size={9} />
+                            if (ft === 'currency') return <DollarSign size={9} />
+                            if (ft === 'percent') return <Percent size={9} />
+                            if (ft === 'date' || ft === 'datetime') return <Calendar size={9} />
+                            if (ft === 'text') return <CaseSensitive size={9} />
+                            return <Paintbrush size={9} />
+                          })()}
+                        </button>
+                      )}
+                    </span>
                     {/* Column resize handle */}
                     <div
                       className="absolute right-0 top-0 bottom-0 w-[5px] cursor-col-resize hover:bg-gray-300/50 active:bg-gray-400/50 z-10"
@@ -5772,7 +6049,7 @@ function PivotCard({
                     <th
                       key={i}
                       ref={(el) => { if (el) thRefs.current.set(ci, el); else thRefs.current.delete(ci) }}
-                      className="text-right px-2.5 py-2 text-[10px] font-semibold text-gray-500 border-b border-gray-200 sticky top-0 bg-gray-50 whitespace-nowrap relative select-none overflow-hidden text-ellipsis"
+                      className="text-right px-2.5 py-2 text-[10px] font-semibold text-gray-500 border-b border-gray-200 sticky top-0 bg-gray-50 whitespace-nowrap relative select-none overflow-hidden text-ellipsis group/th"
                     >
                       {editingColIdx === i && editMode ? (
                         <input
@@ -5790,7 +6067,7 @@ function PivotCard({
                         />
                       ) : (
                         <span
-                          className={cn(editMode && 'cursor-text hover:text-gray-700')}
+                          className={cn('inline-flex items-center gap-1 justify-end', editMode && 'cursor-text hover:text-gray-700')}
                           onDoubleClick={() => {
                             if (!editMode) return
                             setDraftColLabel(h)
@@ -5798,6 +6075,37 @@ function PivotCard({
                           }}
                         >
                           {h}
+                          {editMode && (() => {
+                            const vc = config?.values[i % (config?.values.length || 1)]
+                            const fmtKey = vc ? (vc.column || vc.id) : String(i)
+                            return (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  const th = (e.currentTarget as HTMLElement).closest('th')
+                                  if (th) openPivotFmtToolbar(fmtKey, th)
+                                }}
+                                onMouseDown={(e) => e.stopPropagation()}
+                                className={cn(
+                                  'p-0.5 rounded transition-all cursor-pointer',
+                                  widget.columnFormats?.[fmtKey]
+                                    ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-200/50'
+                                    : 'text-gray-300 opacity-0 group-hover/th:opacity-100 hover:text-gray-500 hover:bg-gray-200/50'
+                                )}
+                                title="Format column"
+                              >
+                                {(() => {
+                                  const ft = widget.columnFormats?.[fmtKey]?.type
+                                  if (ft === 'number') return <Hash size={9} />
+                                  if (ft === 'currency') return <DollarSign size={9} />
+                                  if (ft === 'percent') return <Percent size={9} />
+                                  if (ft === 'date' || ft === 'datetime') return <Calendar size={9} />
+                                  if (ft === 'text') return <CaseSensitive size={9} />
+                                  return <Paintbrush size={9} />
+                                })()}
+                              </button>
+                            )
+                          })()}
                         </span>
                       )}
                       {/* Column resize handle */}
@@ -5860,6 +6168,17 @@ function PivotCard({
           </table>
         )}
       </div>
+
+      {/* Quick Column Format Toolbar */}
+      {editMode && pivotFmtCol && pivotFmtRect && (
+        <ColumnFormatToolbar
+          colKey={pivotFmtCol}
+          currentFormat={widget.columnFormats?.[pivotFmtCol]}
+          anchorRect={pivotFmtRect}
+          onApply={handlePivotFmtApply}
+          onClose={() => { setPivotFmtCol(null); setPivotFmtRect(null) }}
+        />
+      )}
     </div>
   )
 }
