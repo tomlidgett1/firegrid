@@ -330,12 +330,12 @@ export async function syncSales(
     `${LS_API_BASE}/Account/${accountId}/Sale.json` +
     `?load_relations=${encodeURIComponent('["SaleLines","SaleLines.Item","SalePayments","SalePayments.PaymentType","Customer","Employee","Shop"]')}` +
     `&limit=100` +
-    `&sort=-updatetime`
+    `&sort=-updateTime`
 
   // Incremental sync — only fetch sales updated after last sync
   if (lastSync) {
     const syncDateStr = lastSync.toISOString().replace('Z', '+00:00')
-    nextUrl += `&updatetime=${encodeURIComponent('>,' + syncDateStr)}`
+    nextUrl += `&updateTime=${encodeURIComponent('>,' + syncDateStr)}`
   }
 
   onProgress?.('Fetching sales from Lightspeed...')
