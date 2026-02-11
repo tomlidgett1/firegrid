@@ -59,6 +59,8 @@ import {
   CaseSensitive,
   MousePointer2,
   Minus as MinusIcon,
+  Undo2,
+  Redo2,
 } from 'lucide-react'
 import {
   BarChart,
@@ -294,6 +296,95 @@ export default function DashboardCreatorPage() {
   const searchInputRef = useRef<HTMLInputElement>(null)
   const gridContainerRef = useRef<HTMLDivElement>(null)
   const [gridWidth, setGridWidth] = useState(0)
+
+  // Undo/Redo history
+  const historyRef = useRef<string[]>([]) // serialised widget snapshots
+  const historyIdxRef = useRef(-1)
+  const isUndoRedoRef = useRef(false)
+  const MAX_HISTORY = 50
+
+  // Record widget changes to history (debounced to avoid rapid-fire)
+  const historyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => {
+    if (isUndoRedoRef.current) {
+      isUndoRedoRef.current = false
+      return
+    }
+    // Debounce: only record after 300ms of no further changes
+    if (historyTimerRef.current) clearTimeout(historyTimerRef.current)
+    historyTimerRef.current = setTimeout(() => {
+      const snapshot = JSON.stringify(widgets)
+      const currentSnapshot = historyRef.current[historyIdxRef.current]
+      if (snapshot === currentSnapshot) return // no actual change
+      // Trim any future history if we're not at the end
+      historyRef.current = historyRef.current.slice(0, historyIdxRef.current + 1)
+      historyRef.current.push(snapshot)
+      // Cap history size
+      if (historyRef.current.length > MAX_HISTORY) {
+        historyRef.current = historyRef.current.slice(-MAX_HISTORY)
+      }
+      historyIdxRef.current = historyRef.current.length - 1
+    }, 300)
+    return () => { if (historyTimerRef.current) clearTimeout(historyTimerRef.current) }
+  }, [widgets])
+
+  const canUndo = historyIdxRef.current > 0
+  const canRedo = historyIdxRef.current < historyRef.current.length - 1
+
+  const handleUndo = useCallback(() => {
+    if (historyIdxRef.current <= 0) return
+    // Flush any pending debounce so we have the latest state recorded
+    if (historyTimerRef.current) {
+      clearTimeout(historyTimerRef.current)
+      historyTimerRef.current = null
+      const snapshot = JSON.stringify(widgets)
+      const currentSnapshot = historyRef.current[historyIdxRef.current]
+      if (snapshot !== currentSnapshot) {
+        historyRef.current = historyRef.current.slice(0, historyIdxRef.current + 1)
+        historyRef.current.push(snapshot)
+        if (historyRef.current.length > MAX_HISTORY) {
+          historyRef.current = historyRef.current.slice(-MAX_HISTORY)
+        }
+        historyIdxRef.current = historyRef.current.length - 1
+      }
+    }
+    if (historyIdxRef.current <= 0) return
+    historyIdxRef.current--
+    isUndoRedoRef.current = true
+    setWidgets(JSON.parse(historyRef.current[historyIdxRef.current]))
+  }, [widgets])
+
+  const handleRedo = useCallback(() => {
+    if (historyIdxRef.current >= historyRef.current.length - 1) return
+    historyIdxRef.current++
+    isUndoRedoRef.current = true
+    setWidgets(JSON.parse(historyRef.current[historyIdxRef.current]))
+  }, [])
+
+  // Keyboard shortcuts: Cmd+Z / Cmd+Shift+Z
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (!editMode) return
+      if ((e.metaKey || e.ctrlKey) && e.key === 'z' && !e.shiftKey) {
+        e.preventDefault()
+        handleUndo()
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key === 'z' && e.shiftKey) {
+        e.preventDefault()
+        handleRedo()
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [editMode, handleUndo, handleRedo])
+
+  // Force re-render to update canUndo/canRedo in toolbar
+  const [, forceHistoryRender] = useState(0)
+  useEffect(() => {
+    // Trigger a re-render shortly after widgets change so toolbar buttons update
+    const t = setTimeout(() => forceHistoryRender((n) => n + 1), 350)
+    return () => clearTimeout(t)
+  }, [widgets])
 
   // Save state
   const [currentDashboardId, setCurrentDashboardId] = useState<string | null>(dashboardId ?? null)
@@ -1279,6 +1370,35 @@ export default function DashboardCreatorPage() {
       {/* Format Toolbar — visible in edit mode */}
       {editMode && (
         <div className="flex items-center gap-0.5 px-4 py-1 border-b border-gray-200 bg-white shrink-0">
+          {/* Undo */}
+          <button
+            onClick={handleUndo}
+            disabled={!canUndo}
+            className={cn(
+              'px-2 py-1.5 rounded-md transition-colors cursor-pointer text-gray-500 hover:text-gray-700 hover:bg-gray-50',
+              'disabled:opacity-30 disabled:cursor-default disabled:hover:bg-transparent disabled:hover:text-gray-500'
+            )}
+            title="Undo (⌘Z)"
+          >
+            <Undo2 size={14} />
+          </button>
+
+          {/* Redo */}
+          <button
+            onClick={handleRedo}
+            disabled={!canRedo}
+            className={cn(
+              'px-2 py-1.5 rounded-md transition-colors cursor-pointer text-gray-500 hover:text-gray-700 hover:bg-gray-50',
+              'disabled:opacity-30 disabled:cursor-default disabled:hover:bg-transparent disabled:hover:text-gray-500'
+            )}
+            title="Redo (⌘⇧Z)"
+          >
+            <Redo2 size={14} />
+          </button>
+
+          {/* Separator */}
+          <div className="w-px h-5 bg-gray-200 mx-1" />
+
           {/* Currency */}
           <button
             onClick={() => {
