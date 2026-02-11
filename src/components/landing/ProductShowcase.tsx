@@ -656,10 +656,10 @@ export default function ProductShowcase() {
   const [active, setActive] = useState<Slide>('collections')
 
   return (
-    <section className="pt-6 pb-12 md:pb-16 px-6">
+    <section className="pt-0 pb-20 md:pb-28 px-6">
       <div className="max-w-5xl mx-auto">
         {/* Tabs + caption */}
-        <div className="flex flex-col items-center mb-5">
+        <div className="flex flex-col items-center mb-8">
           <div className="flex items-center bg-gray-100 p-0.5 rounded-md">
             {slides.map((slide) => {
               const Icon = slideIcons[slide]

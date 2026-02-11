@@ -5,7 +5,7 @@ const container: Variants = {
   hidden: { opacity: 0 },
   visible: {
     opacity: 1,
-    transition: { staggerChildren: 0.1, delayChildren: 0.1 },
+    transition: { staggerChildren: 0.12, delayChildren: 0.1 },
   },
 }
 
@@ -20,7 +20,7 @@ const item: Variants = {
 
 export default function HeroSection() {
   return (
-    <section className="relative flex flex-col items-center pt-28 md:pt-36 pb-2 px-6 overflow-hidden">
+    <section className="relative flex flex-col items-center pt-36 md:pt-48 pb-16 md:pb-24 px-6 overflow-hidden">
       <motion.div
         variants={container}
         initial="hidden"
@@ -41,13 +41,13 @@ export default function HeroSection() {
         {/* One-liner */}
         <motion.p
           variants={item}
-          className="text-base text-gray-400 max-w-md mx-auto mt-4"
+          className="text-base md:text-lg text-gray-400 max-w-md mx-auto mt-5"
         >
           Explore, query, and dashboard your Firestore — entirely in the browser.
         </motion.p>
 
         {/* CTA row */}
-        <motion.div variants={item} className="mt-6 flex items-center gap-3">
+        <motion.div variants={item} className="mt-8 flex items-center gap-3">
           <Link
             to="/login"
             className="bg-gray-900 hover:bg-gray-800 text-white rounded-md px-6 py-2.5 text-sm font-medium transition-colors"
@@ -75,7 +75,7 @@ export default function HeroSection() {
         </motion.div>
 
         {/* Trust micro-text */}
-        <motion.p variants={item} className="text-[11px] text-gray-300 mt-3">
+        <motion.p variants={item} className="text-[11px] text-gray-300 mt-4">
           100% client-side · Your data never leaves your browser
         </motion.p>
       </motion.div>
