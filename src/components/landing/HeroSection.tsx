@@ -1,6 +1,5 @@
 import { motion, type Variants } from 'framer-motion'
 import { Link } from 'react-router-dom'
-import AppPreview from './AppPreview'
 
 const container: Variants = {
   hidden: { opacity: 0 },
@@ -21,7 +20,7 @@ const item: Variants = {
 
 export default function HeroSection() {
   return (
-    <section className="relative flex flex-col items-center pt-36 md:pt-44 pb-16 px-6 overflow-hidden">
+    <section className="relative flex flex-col items-center pt-36 md:pt-44 pb-8 px-6 overflow-hidden">
       {/* Content */}
       <motion.div
         variants={container}
@@ -80,9 +79,6 @@ export default function HeroSection() {
           </a>
         </motion.div>
       </motion.div>
-
-      {/* App Preview */}
-      <AppPreview />
     </section>
   )
 }
