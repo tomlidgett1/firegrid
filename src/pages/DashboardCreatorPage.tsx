@@ -75,7 +75,7 @@ import DarkModeToggle from '@/components/DarkModeToggle'
 
 type WidgetType = 'table' | 'heading' | 'text' | 'divider' | 'metric' | 'chart' | 'pivot'
 
-type AggregationType = 'count' | 'sum' | 'average' | 'min' | 'max' | 'count_distinct'
+type AggregationType = 'none' | 'count' | 'sum' | 'average' | 'min' | 'max' | 'count_distinct'
 
 type FilterOperator =
   | 'equals'
@@ -2942,6 +2942,7 @@ function ElementCard({
 /* ---- Metric helpers ---- */
 
 const AGGREGATION_LABELS: Record<AggregationType, string> = {
+  none: 'None (Raw)',
   count: 'Count',
   sum: 'Sum',
   average: 'Average',
@@ -5779,7 +5780,7 @@ function PivotConfigPanel({
                     {draftValues.length > 0 ? (
                       <div className="space-y-1.5">
                         {draftValues.map((v) => {
-                          const label = v.label || `${AGGREGATION_LABELS[v.aggregation]} of ${v.column || '…'}`
+                          const label = v.label || (v.aggregation === 'none' ? (v.column || '…') : `${AGGREGATION_LABELS[v.aggregation]} of ${v.column || '…'}`)
                           return (
                             <div key={v.id} className="bg-gray-50 rounded-md p-2 group/val">
                               <div className="flex items-center gap-2 mb-1.5">
@@ -6410,7 +6411,7 @@ function usePivotData(
     const { rowColumns, colColumns, values } = config
 
     // Build a map: rowKey -> colKey -> valueIndex -> accumulated values
-    const dataMap = new Map<string, Map<string, { sums: number[]; counts: number[]; vals: number[][] }>>()
+    const dataMap = new Map<string, Map<string, { sums: number[]; counts: number[]; vals: number[][]; raws: unknown[][] }>>()
     const colKeySet = new Set<string>()
 
     for (const row of rows) {
@@ -6425,22 +6426,28 @@ function usePivotData(
           sums: new Array(values.length).fill(0),
           counts: new Array(values.length).fill(0),
           vals: values.map(() => []),
+          raws: values.map(() => []),
         })
       }
       const bucket = colMap.get(colKey)!
 
       values.forEach((vc, vi) => {
         const raw = row[vc.column]
-        const num = raw != null ? parseFloat(String(raw)) : NaN
-        if (vc.aggregation === 'count') {
+        if (vc.aggregation === 'none') {
+          bucket.raws[vi].push(raw)
+          bucket.counts[vi]++
+        } else if (vc.aggregation === 'count') {
           bucket.counts[vi]++
         } else if (vc.aggregation === 'count_distinct') {
           bucket.vals[vi].push(raw as number) // we'll unique later
           bucket.counts[vi]++
-        } else if (!isNaN(num)) {
-          bucket.sums[vi] += num
-          bucket.counts[vi]++
-          bucket.vals[vi].push(num)
+        } else {
+          const num = raw != null ? parseFloat(String(raw)) : NaN
+          if (!isNaN(num)) {
+            bucket.sums[vi] += num
+            bucket.counts[vi]++
+            bucket.vals[vi].push(num)
+          }
         }
       })
     }
@@ -6452,19 +6459,19 @@ function usePivotData(
     const headers: string[] = []
     for (const ck of colKeys) {
       for (const vc of values) {
-        const label = vc.label || `${AGGREGATION_LABELS[vc.aggregation]}${vc.column ? ` of ${vc.column}` : ''}`
+        const label = vc.label || (vc.aggregation === 'none' ? (vc.column || '—') : `${AGGREGATION_LABELS[vc.aggregation]}${vc.column ? ` of ${vc.column}` : ''}`)
         headers.push(colKeys.length > 1 && ck !== '__all__' ? `${ck} — ${label}` : label)
       }
     }
 
     // Build rows
-    const resultRows: { keys: unknown[]; values: (number | null)[] }[] = []
+    const resultRows: { keys: unknown[]; values: unknown[] }[] = []
     const sortedRowKeys = [...dataMap.keys()].sort()
 
     for (const rowKey of sortedRowKeys) {
       const keys = rowKey.split('|||')
       const colMap = dataMap.get(rowKey)!
-      const rowValues: (number | null)[] = []
+      const rowValues: unknown[] = []
 
       for (const ck of colKeys) {
         const bucket = colMap.get(ck)
@@ -6475,6 +6482,10 @@ function usePivotData(
           }
           const vc = values[vi]
           switch (vc.aggregation) {
+            case 'none':
+              // Raw value — take the first value in the bucket
+              rowValues.push(bucket.raws[vi][0] ?? null)
+              break
             case 'count':
               rowValues.push(bucket.counts[vi])
               break
