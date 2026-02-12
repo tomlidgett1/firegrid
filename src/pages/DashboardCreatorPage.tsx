@@ -997,7 +997,20 @@ export default function DashboardCreatorPage() {
     setSaveStatus('saving')
     try {
       const id = currentDashboardIdRef.current ?? crypto.randomUUID()
-      const widgetsToSave = widgetsToSaveRaw.map(({ minW, minH, ...rest }) => rest)
+      // Strip undefined values recursively — Firestore rejects undefined
+      const stripUndefined = (obj: unknown): unknown => {
+        if (obj === null || obj === undefined) return null
+        if (Array.isArray(obj)) return obj.map(stripUndefined)
+        if (typeof obj === 'object' && obj !== null) {
+          const clean: Record<string, unknown> = {}
+          for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
+            if (v !== undefined) clean[k] = stripUndefined(v)
+          }
+          return clean
+        }
+        return obj
+      }
+      const widgetsToSave = widgetsToSaveRaw.map(({ minW, minH, ...rest }) => stripUndefined(rest))
 
       const isNew = !currentDashboardIdRef.current
       const payload: Record<string, unknown> = {
@@ -7127,7 +7140,7 @@ function PivotCard({
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-auto px-3 pb-3">
+      <div className="flex-1 overflow-hidden px-3 pb-3 flex flex-col min-h-0">
         {loading ? (
           <div className="flex items-center justify-center h-full gap-2 text-xs text-gray-400">
             <Loader2 size={14} className="animate-spin" />Loading…
@@ -7141,7 +7154,7 @@ function PivotCard({
             Add values to build the pivot table
           </div>
         ) : (
-          <div className="border border-gray-200 rounded-md overflow-auto [&_th:last-child]:border-r-0 [&_td:last-child]:border-r-0 [&_tbody_tr:last-child_td]:border-b-0">
+          <div className="flex-1 min-h-0 border border-gray-200 rounded-md overflow-auto [&_th:last-child]:border-r-0 [&_td:last-child]:border-r-0 [&_tbody_tr:last-child_td]:border-b-0">
           <table className="text-xs border-collapse" style={{ tableLayout: 'fixed', minWidth: '100%' }}>
             <colgroup>
               {pivotData.rowHeaders.map((_, ri) => (
@@ -7164,7 +7177,7 @@ function PivotCard({
                     key={rh}
                     ref={(el) => { if (el) thRefs.current.set(ri, el); else thRefs.current.delete(ri) }}
                     rowSpan={pivotData.hasColGroups ? 2 : 1}
-                    className="text-left px-3 py-2.5 text-xs font-medium text-gray-600 border-b border-r border-gray-200 sticky top-0 bg-gray-200/70 relative select-none overflow-hidden text-ellipsis whitespace-nowrap group/th cursor-pointer"
+                    className="text-left px-3 py-2.5 text-xs font-medium text-gray-600 border-b border-r border-gray-200 sticky top-0 left-0 z-20 bg-gray-200 relative select-none overflow-hidden text-ellipsis whitespace-nowrap group/th cursor-pointer"
                     onContextMenu={(e) => {
                       e.preventDefault()
                       setPivotCtxMenu({ x: e.clientX, y: e.clientY, columnKey: rh, displayName: displayLabel, colIdx: ri })
@@ -7275,7 +7288,7 @@ function PivotCard({
                     <th
                       key={`cg-${gi}`}
                       colSpan={group.span}
-                      className="text-center px-3 py-2 text-xs font-semibold text-gray-700 border-b border-r border-gray-200 sticky top-0 bg-gray-50/80 whitespace-nowrap"
+                      className="text-center px-3 py-2 text-xs font-semibold text-gray-700 border-b border-r border-gray-200 sticky top-0 z-10 bg-gray-50 whitespace-nowrap"
                     >
                       {group.label}
                     </th>
@@ -7289,7 +7302,7 @@ function PivotCard({
                       <th
                         key={i}
                         ref={(el) => { if (el) thRefs.current.set(ci, el); else thRefs.current.delete(ci) }}
-                        className="text-right px-3 py-2.5 text-xs font-medium text-gray-600 border-b border-r border-gray-200 sticky top-0 bg-gray-50/80 whitespace-nowrap relative select-none overflow-hidden text-ellipsis group/th cursor-pointer"
+                        className="text-right px-3 py-2.5 text-xs font-medium text-gray-600 border-b border-r border-gray-200 sticky top-0 z-10 bg-gray-50 whitespace-nowrap relative select-none overflow-hidden text-ellipsis group/th cursor-pointer"
                         onContextMenu={(e) => {
                           e.preventDefault()
                           const vc = config?.values[i % (config?.values.length || 1)]
@@ -7412,7 +7425,7 @@ function PivotCard({
                       <th
                         key={i}
                         ref={(el) => { if (el) thRefs.current.set(ci, el); else thRefs.current.delete(ci) }}
-                        className="text-right px-3 py-2 text-[10px] font-medium text-gray-500 border-b border-r border-gray-200 sticky top-[29px] bg-gray-50/90 whitespace-nowrap relative select-none overflow-hidden text-ellipsis group/th cursor-pointer"
+                        className="text-right px-3 py-2 text-[10px] font-medium text-gray-500 border-b border-r border-gray-200 sticky top-[29px] z-10 bg-gray-50 whitespace-nowrap relative select-none overflow-hidden text-ellipsis group/th cursor-pointer"
                         onContextMenu={(e) => {
                           e.preventDefault()
                           const vc = config?.values[vlIdx]
@@ -7484,7 +7497,7 @@ function PivotCard({
                       displayVal = String(k ?? '—')
                     }
                     return (
-                    <td key={ki} className="px-3 py-2 text-xs text-gray-800 border-b border-r border-gray-200 font-medium whitespace-nowrap overflow-hidden text-ellipsis bg-gray-100" style={cellStyle}>{displayVal}</td>
+                    <td key={ki} className={cn("px-3 py-2 text-xs text-gray-800 border-b border-r border-gray-200 font-medium whitespace-nowrap overflow-hidden text-ellipsis bg-gray-100", ki === 0 && "sticky left-0 z-10")} style={cellStyle}>{displayVal}</td>
                     )
                   })}
                   {row.values.map((v, vi) => {
