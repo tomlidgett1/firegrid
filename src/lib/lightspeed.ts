@@ -99,6 +99,8 @@ export async function getLightspeedConnection(uid: string): Promise<LightspeedCo
     expiresAt: data.expiresAt?.toDate?.() ?? new Date(),
     lastSalesSync: data.lastSalesSync?.toDate?.() ?? null,
     connectedAt: data.connectedAt?.toDate?.() ?? new Date(),
+    syncCursor: data.syncCursor ?? null,
+    syncStartedAt: data.syncStartedAt?.toDate?.() ?? null,
   }
 }
 
@@ -151,10 +153,31 @@ export async function updateLightspeedTokens(
   )
 }
 
-async function updateLastSalesSync(uid: string): Promise<void> {
+/** Save sync-in-progress cursor so we can resume if interrupted */
+async function updateSyncCursor(uid: string, cursor: string, syncStartedAt?: Date): Promise<void> {
   if (!db) return
   const docRef = doc(db, 'users', uid, 'integrations', 'lightspeed')
-  await setDoc(docRef, { lastSalesSync: serverTimestamp(), updatedAt: serverTimestamp() }, { merge: true })
+  const update: Record<string, unknown> = { syncCursor: cursor, updatedAt: serverTimestamp() }
+  if (syncStartedAt) {
+    update.syncStartedAt = Timestamp.fromDate(syncStartedAt)
+  }
+  await setDoc(docRef, update, { merge: true })
+}
+
+/** Mark sync as fully complete — set lastSalesSync, clear cursor */
+async function completeSyncRun(uid: string, syncStartedAt: Date): Promise<void> {
+  if (!db) return
+  const docRef = doc(db, 'users', uid, 'integrations', 'lightspeed')
+  await setDoc(
+    docRef,
+    {
+      lastSalesSync: Timestamp.fromDate(syncStartedAt),
+      syncCursor: null,
+      syncStartedAt: null,
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true }
+  )
 }
 
 /**
@@ -291,7 +314,17 @@ function parseSaleToItems(raw: Record<string, unknown>): LightspeedSoldItem[] {
 
 /**
  * Fetches sales from Lightspeed and stores one document per item sold.
- * Uses lastSalesSync for incremental sync.
+ *
+ * Three modes:
+ *   1. INCREMENTAL — `lastSalesSync` exists, no `syncCursor`:
+ *      fetch `updateTime > lastSalesSync`, newest first (only new/changed data)
+ *   2. RESUME HISTORICAL — `syncCursor` exists, no `lastSalesSync`:
+ *      pick up an interrupted historical fetch, continuing backwards from cursor
+ *   3. FRESH HISTORICAL — neither exists:
+ *      fetch everything, newest first
+ *
+ * After each batch flush the cursor is saved to Firestore, so an interrupted
+ * sync can be resumed without re-fetching already-stored items.
  */
 export async function syncSales(
   uid: string,
@@ -301,26 +334,44 @@ export async function syncSales(
 
   const { accessToken, accountId } = await ensureValidToken(uid)
   const conn = await getLightspeedConnection(uid)
+
   const lastSync = conn?.lastSalesSync
+  const existingCursor = conn?.syncCursor
+  const isIncremental = !!lastSync && !existingCursor
+  const isResume = !!existingCursor && !lastSync
+
+  // Record when this sync run started (for setting lastSalesSync on completion).
+  // If resuming, reuse the original syncStartedAt so the window stays correct.
+  const syncStartedAt = isResume && conn?.syncStartedAt
+    ? conn.syncStartedAt
+    : new Date()
 
   let totalItems = 0
   const FLUSH_LIMIT = 1000
   let buffer: LightspeedSoldItem[] = []
+  let oldestUpdateTimeInRun: string | null = null
 
-  // Build initial URL with relations
+  // ---- Build initial URL ----
+  const relations = '["SaleLines","SaleLines.Item","SalePayments","SalePayments.PaymentType","Customer","Customer.Contact"]'
   let nextUrl: string | null =
     `${LS_API_BASE}/Account/${accountId}/Sale.json` +
-    `?load_relations=${encodeURIComponent('["SaleLines","SaleLines.Item","SalePayments","SalePayments.PaymentType","Customer","Customer.Contact"]')}` +
+    `?load_relations=${encodeURIComponent(relations)}` +
     `&limit=100` +
     `&sort=-updateTime`
 
-  // Incremental sync — only fetch sales updated after last sync
-  if (lastSync) {
-    const syncDateStr = lastSync.toISOString().replace('Z', '+00:00')
+  if (isIncremental) {
+    // Only fetch sales updated after the last completed sync
+    const syncDateStr = lastSync!.toISOString().replace('Z', '+00:00')
     nextUrl += `&updateTime=${encodeURIComponent('>,' + syncDateStr)}`
+    onProgress?.('Fetching new/updated sales since last sync...')
+  } else if (isResume) {
+    // Continue backwards from where we left off
+    nextUrl += `&updateTime=${encodeURIComponent('<,' + existingCursor!)}`
+    onProgress?.(`Resuming historical sync from ${existingCursor}...`)
+  } else {
+    // Fresh historical — fetch everything, newest first
+    onProgress?.('Starting full historical sync (newest first)...')
   }
-
-  onProgress?.('Fetching sales from Lightspeed...')
 
   while (nextUrl) {
     try {
@@ -335,8 +386,15 @@ export async function syncSales(
 
       // Flatten each sale into individual item rows
       for (const rawSale of salesArray) {
-        const items = parseSaleToItems(rawSale as Record<string, unknown>)
+        const raw = rawSale as Record<string, unknown>
+        const items = parseSaleToItems(raw)
         buffer = buffer.concat(items)
+
+        // Track the oldest updateTime we've seen (for the cursor)
+        const ut = String(raw.updatetime || raw.updateTime || '')
+        if (ut && (!oldestUpdateTimeInRun || ut < oldestUpdateTimeInRun)) {
+          oldestUpdateTimeInRun = ut
+        }
       }
 
       onProgress?.(`Fetched ${totalItems + buffer.length} items...`)
@@ -346,10 +404,16 @@ export async function syncSales(
         await flushItemsToFirestore(uid, buffer, onProgress, totalItems)
         totalItems += buffer.length
         buffer = []
+
+        // Save cursor progress so we can resume if interrupted
+        if (!isIncremental && oldestUpdateTimeInRun) {
+          await updateSyncCursor(uid, oldestUpdateTimeInRun, syncStartedAt)
+        }
+
         onProgress?.(`Stored ${totalItems} items so far, fetching more...`)
       }
 
-      // Cursor-based pagination
+      // Cursor-based pagination — follow the "next" URL
       const nextAttr = attrs?.next as string | undefined
       if (nextAttr && nextAttr.length > 0) {
         nextUrl = nextAttr.startsWith('http')
@@ -371,13 +435,18 @@ export async function syncSales(
     }
   }
 
-  // Flush remaining
+  // Flush remaining buffer
   if (buffer.length > 0) {
     await flushItemsToFirestore(uid, buffer, onProgress, totalItems)
     totalItems += buffer.length
+
+    if (!isIncremental && oldestUpdateTimeInRun) {
+      await updateSyncCursor(uid, oldestUpdateTimeInRun, syncStartedAt)
+    }
   }
 
-  await updateLastSalesSync(uid)
+  // Sync run fully completed — mark done, clear cursor
+  await completeSyncRun(uid, syncStartedAt)
   onProgress?.(`Sync complete! ${totalItems} items stored.`)
 
   return { synced: totalItems, total: totalItems }

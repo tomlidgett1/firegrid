@@ -70,6 +70,10 @@ export interface LightspeedConnection {
   expiresAt: Date
   lastSalesSync: Date | null
   connectedAt: Date
+  /** Tracks the oldest updateTime fetched so far during an active/interrupted historical sync */
+  syncCursor: string | null
+  /** When the current sync run was started (used to set lastSalesSync on completion) */
+  syncStartedAt: Date | null
 }
 
 /**
