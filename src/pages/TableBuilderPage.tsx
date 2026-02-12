@@ -18,7 +18,7 @@ import {
 import type { FieldInfo, DocumentData, ColumnConfig, SavedTable } from '@/lib/types'
 import { db } from '@/lib/firebase'
 import { trackTableSaved, trackPageView } from '@/lib/metrics'
-import { doc, getDoc, setDoc, serverTimestamp, collection, query, getDocs, orderBy } from 'firebase/firestore'
+import { doc, getDoc, setDoc, serverTimestamp, collection, query, getDocs, orderBy, limit } from 'firebase/firestore'
 import {
   useReactTable,
   getCoreRowModel,
@@ -202,12 +202,8 @@ export default function TableBuilderPage() {
   const [schema, setSchema] = useState<FieldInfo[]>([])
   const [columns, setColumns] = useState<ColumnConfig[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadProgress, setLoadProgress] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-
-  // Pagination for fetching (regular uses pageToken, group uses lastDocPath)
-  const [nextPageToken, setNextPageToken] = useState<string | undefined>()
-  const [lastDocPath, setLastDocPath] = useState<string | undefined>()
-  const [fetchingMore, setFetchingMore] = useState(false)
 
   // Table state
   const [sorting, setSorting] = useState<SortingState>([])
@@ -313,10 +309,12 @@ export default function TableBuilderPage() {
       .catch(console.error)
   }, [tableId, user?.uid])
 
-  // Fetch documents and discover schema
+  // Fetch ALL documents and discover schema
   useEffect(() => {
     if (!user?.accessToken || !projectId || !collectionPath) return
+    let cancelled = false
     setLoading(true)
+    setLoadProgress(null)
     setError(null)
 
     const loadData = async () => {
@@ -328,23 +326,40 @@ export default function TableBuilderPage() {
         const discovered = discoverSchema(samples)
         setSchema(discovered)
 
-        // Fetch first page
-        let documents: DocumentData[]
+        // Fetch ALL documents by paging through entire collection.
+        // Uses 300 per batch (Firestore REST max) for efficiency.
+        const BATCH_SIZE = 300
+        const allDocuments: DocumentData[] = []
+
         if (isCollectionGroup) {
-          const result = await fetchCollectionGroup(user.accessToken!, projectId, collectionPath, 100)
-          documents = result.documents
-          setLastDocPath(result.lastDocumentPath)
-          setNextPageToken(undefined)
+          let cursor: string | undefined
+          // eslint-disable-next-line no-constant-condition
+          while (true) {
+            if (cancelled) return
+            const result = await fetchCollectionGroup(user.accessToken!, projectId, collectionPath, BATCH_SIZE, cursor)
+            allDocuments.push(...result.documents)
+            cursor = result.lastDocumentPath
+            if (!cancelled) setLoadProgress(`Loaded ${allDocuments.length.toLocaleString()} documents…`)
+            if (!cursor || result.documents.length < BATCH_SIZE) break
+          }
         } else {
-          const result = await fetchDocuments(user.accessToken!, projectId, collectionPath, 100)
-          documents = result.documents
-          setNextPageToken(result.nextPageToken)
-          setLastDocPath(undefined)
+          let token: string | undefined
+          // eslint-disable-next-line no-constant-condition
+          while (true) {
+            if (cancelled) return
+            const result = await fetchDocuments(user.accessToken!, projectId, collectionPath, BATCH_SIZE, token)
+            allDocuments.push(...result.documents)
+            token = result.nextPageToken
+            if (!cancelled) setLoadProgress(`Loaded ${allDocuments.length.toLocaleString()} documents…`)
+            if (!token || result.documents.length < BATCH_SIZE) break
+          }
         }
 
-        setAllDocs(documents)
+        if (cancelled) return
 
-        const flattened = documents.map((d) => {
+        setAllDocs(allDocuments)
+
+        const flattened = allDocuments.map((d) => {
           const { __id, __path, __parentId, ...rest } = d
           return {
             __id,
@@ -401,53 +416,20 @@ export default function TableBuilderPage() {
           setColumns([...metaCols, ...dataCols])
         }
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load data')
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load data')
       } finally {
-        setLoading(false)
+        if (!cancelled) {
+          setLoading(false)
+          setLoadProgress(null)
+        }
       }
     }
 
     loadData()
+    return () => { cancelled = true }
   }, [user?.accessToken, projectId, collectionPath, tableId, isCollectionGroup])
 
-  const hasMore = isCollectionGroup ? !!lastDocPath : !!nextPageToken
-
-  // Load more pages
-  const loadMore = useCallback(async () => {
-    if (fetchingMore || !user?.accessToken || !projectId) return
-    if (isCollectionGroup && !lastDocPath) return
-    if (!isCollectionGroup && !nextPageToken) return
-
-    setFetchingMore(true)
-    try {
-      let newDocs: DocumentData[]
-
-      if (isCollectionGroup) {
-        const result = await fetchCollectionGroup(user.accessToken, projectId, collectionPath, 100, lastDocPath)
-        newDocs = result.documents
-        setLastDocPath(result.lastDocumentPath)
-      } else {
-        const result = await fetchDocuments(user.accessToken, projectId, collectionPath, 100, nextPageToken)
-        newDocs = result.documents
-        setNextPageToken(result.nextPageToken)
-      }
-
-      setAllDocs((prev) => [...prev, ...newDocs])
-      const newFlat = newDocs.map((d) => {
-        const { __id, __path, __parentId, ...rest } = d
-        return {
-          __id,
-          ...(isCollectionGroup ? { __path: __path ?? '', __parentId: __parentId ?? '' } : {}),
-          ...flattenObject(rest as Record<string, unknown>),
-        }
-      })
-      setFlatDocs((prev) => [...prev, ...newFlat])
-    } catch (err) {
-      console.error('Failed to load more:', err)
-    } finally {
-      setFetchingMore(false)
-    }
-  }, [nextPageToken, lastDocPath, fetchingMore, user?.accessToken, projectId, collectionPath, isCollectionGroup])
+  // All data is loaded upfront — no "load more" needed
 
   // ---- Column helpers ----
 
@@ -666,9 +648,14 @@ export default function TableBuilderPage() {
   if (loading && !hasLoadedOnce) {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
-        <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
-          <Loader2 size={16} className="animate-spin" />
-          Loading collection data…
+        <div className="flex flex-col items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
+          <div className="flex items-center gap-2">
+            <Loader2 size={16} className="animate-spin" />
+            Loading collection data…
+          </div>
+          {loadProgress && (
+            <span className="text-xs text-gray-400 dark:text-gray-500 tabular-nums">{loadProgress}</span>
+          )}
         </div>
       </div>
     )
@@ -1099,9 +1086,14 @@ export default function TableBuilderPage() {
           {/* Inline loading overlay for table switches */}
           {loading && hasLoadedOnce && (
             <div className="absolute inset-0 z-20 bg-gray-50/80 dark:bg-gray-900/80 backdrop-blur-[1px] flex items-center justify-center">
-              <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-800 px-4 py-2.5 rounded-md border border-gray-200 dark:border-gray-700 shadow-sm">
-                <Loader2 size={14} className="animate-spin" />
-                Loading collection data…
+              <div className="flex flex-col items-center gap-1.5 bg-white dark:bg-gray-800 px-4 py-2.5 rounded-md border border-gray-200 dark:border-gray-700 shadow-sm">
+                <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
+                  <Loader2 size={14} className="animate-spin" />
+                  Loading collection data…
+                </div>
+                {loadProgress && (
+                  <span className="text-xs text-gray-400 dark:text-gray-500 tabular-nums">{loadProgress}</span>
+                )}
               </div>
             </div>
           )}
@@ -1219,23 +1211,13 @@ export default function TableBuilderPage() {
             )}
           </div>
 
-          {/* ===== Footer — Pagination + row count + load more ===== */}
+          {/* ===== Footer — Pagination + row count ===== */}
           <div className="px-4 py-2 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 flex items-center justify-between shrink-0">
-            {/* Left: row info + load more */}
+            {/* Left: row info */}
             <div className="flex items-center gap-3">
               <span className="text-xs text-gray-500 dark:text-gray-400 tabular-nums">
                 {table.getFilteredRowModel().rows.length} of {flatDocs.length} rows
               </span>
-              {hasMore && (
-                <button
-                  onClick={loadMore}
-                  disabled={fetchingMore}
-                  className="flex items-center gap-1 text-xs text-gray-600 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200 transition-colors disabled:opacity-50"
-                >
-                  {fetchingMore && <Loader2 size={11} className="animate-spin" />}
-                  Load more…
-                </button>
-              )}
             </div>
 
             {/* Centre: Pagination */}

@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef, useLayoutEffect, useMemo } from 'react'
+import React, { useEffect, useState, useCallback, useRef, useLayoutEffect, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
@@ -7,7 +7,7 @@ import { collection, query, getDocs, orderBy, doc, setDoc, getDoc, serverTimesta
 import { db } from '@/lib/firebase'
 import { trackDashboardSaved, trackPageView } from '@/lib/metrics'
 import { cn, flattenObject } from '@/lib/utils'
-import { fetchDocuments, fetchCollectionGroup } from '@/lib/firestore-rest'
+import { fetchAllDocuments } from '@/lib/firestore-rest'
 // Custom grid — no third-party grid library
 import { motion, AnimatePresence } from 'framer-motion'
 import {
@@ -16,7 +16,6 @@ import {
   Plus,
   X,
   Table,
-  GripVertical,
   ChevronLeft,
   LayoutDashboard,
   Search,
@@ -56,8 +55,10 @@ import {
   DollarSign,
   Percent,
   Calendar,
+  Clock,
   CaseSensitive,
   MousePointer2,
+  ChevronRight,
   Minus as MinusIcon,
   Undo2,
   Redo2,
@@ -120,7 +121,7 @@ interface MetricConfig {
   colour?: string             // value colour
 }
 
-type DateTruncation = 'none' | 'day' | 'week' | 'month' | 'year'
+type DateTruncation = 'none' | 'hour' | 'day' | 'week' | 'month' | 'quarter' | 'year'
 
 type ChartType = 'bar' | 'line'
 
@@ -156,11 +157,23 @@ interface PivotValueConfig {
   label?: string
 }
 
+type ValuesPlacement = 'columns' | 'rows'
+
+interface PivotColumnFilter {
+  excludeNulls?: boolean
+  excludeBlanks?: boolean
+  excludeValues?: string[]   // stringified values to exclude
+}
+
 interface PivotConfig {
   tableId: string
   rowColumns: string[]      // field(s) for row grouping
   colColumns: string[]      // field(s) for column grouping
   values: PivotValueConfig[]
+  valuesPlacement?: ValuesPlacement  // where multiple values appear: as columns (default) or rows
+  rowColumnLabels?: Record<string, string>  // display labels for row columns
+  columnTruncations?: Record<string, DateTruncation>  // date truncation per column
+  columnFilters?: Record<string, PivotColumnFilter>   // column-level filters
 }
 
 type CondFormatOperator = 'gt' | 'gte' | 'lt' | 'lte' | 'eq' | 'neq' | 'contains' | 'not_contains' | 'is_empty' | 'is_not_empty' | 'between'
@@ -385,6 +398,17 @@ export default function DashboardCreatorPage() {
     const t = setTimeout(() => forceHistoryRender((n) => n + 1), 350)
     return () => clearTimeout(t)
   }, [widgets])
+
+  // Global refresh key — increment to re-fetch all widget data
+  const [globalFetchKey, setGlobalFetchKey] = useState(0)
+  const [isRefreshing, setIsRefreshing] = useState(false)
+
+  const handleGlobalRefresh = useCallback(() => {
+    setIsRefreshing(true)
+    setGlobalFetchKey((k) => k + 1)
+    // Reset the spinning icon after a brief delay
+    setTimeout(() => setIsRefreshing(false), 1200)
+  }, [])
 
   // Save state
   const [currentDashboardId, setCurrentDashboardId] = useState<string | null>(dashboardId ?? null)
@@ -1175,6 +1199,17 @@ export default function DashboardCreatorPage() {
               </button>
             </div>
 
+            {/* Refresh button — always visible */}
+            <button
+              onClick={handleGlobalRefresh}
+              disabled={isRefreshing}
+              className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-md transition-colors disabled:opacity-50"
+              title="Refresh all widget data"
+            >
+              <RefreshCw className={cn('h-3 w-3', isRefreshing && 'animate-spin')} />
+              Refresh
+            </button>
+
             {editMode && (
               <>
                 <div className="h-5 w-px bg-gray-200 mx-1" />
@@ -1717,6 +1752,7 @@ export default function DashboardCreatorPage() {
                         accessToken={user?.accessToken ?? null}
                         isFullWidth={widget.x === 0 && widget.w >= GRID_MAX_W}
                         editMode={editMode}
+                        globalFetchKey={globalFetchKey}
                         onRemove={() => removeWidget(widget.i)}
                         onDuplicate={() => duplicateWidget(widget.i)}
                         onToggleFullWidth={() => toggleFullWidth(widget.i)}
@@ -1748,6 +1784,7 @@ export default function DashboardCreatorPage() {
                         savedTables={savedTables}
                         accessToken={user?.accessToken ?? null}
                         editMode={editMode}
+                        globalFetchKey={globalFetchKey}
                         onRemove={() => removeWidget(widget.i)}
                         onDuplicate={() => duplicateWidget(widget.i)}
                         onOpenConfig={() => setConfiguringWidgetId(widget.i)}
@@ -1767,6 +1804,7 @@ export default function DashboardCreatorPage() {
                         savedTables={savedTables}
                         accessToken={user?.accessToken ?? null}
                         editMode={editMode}
+                        globalFetchKey={globalFetchKey}
                         onRemove={() => removeWidget(widget.i)}
                         onDuplicate={() => duplicateWidget(widget.i)}
                         onOpenConfig={() => setConfiguringWidgetId(widget.i)}
@@ -1781,11 +1819,13 @@ export default function DashboardCreatorPage() {
                   }
                   if (widget.type === 'pivot') {
                     return (
+                      <PivotErrorBoundary>
                       <PivotCard
                         widget={widget}
                         savedTables={savedTables}
                         accessToken={user?.accessToken ?? null}
                         editMode={editMode}
+                        globalFetchKey={globalFetchKey}
                         onRemove={() => removeWidget(widget.i)}
                         onDuplicate={() => duplicateWidget(widget.i)}
                         onOpenConfig={() => setConfiguringWidgetId(widget.i)}
@@ -1794,6 +1834,7 @@ export default function DashboardCreatorPage() {
                         onColumnFormatsChange={(fmts) => updateWidgetColumnFormats(widget.i, fmts)}
                         onColumnSelect={(colKey) => setSelectedColKey(colKey)}
                       />
+                      </PivotErrorBoundary>
                     )
                   }
                   return (
@@ -2178,6 +2219,184 @@ function ColumnContextMenu({
   )
 }
 
+/* ───────── Pivot Header Context Menu ───────── */
+
+const DATE_TRUNCATION_OPTIONS: { value: DateTruncation; label: string }[] = [
+  { value: 'none', label: 'None (exact)' },
+  { value: 'hour', label: 'Hour' },
+  { value: 'day', label: 'Day' },
+  { value: 'week', label: 'Week' },
+  { value: 'month', label: 'Month' },
+  { value: 'quarter', label: 'Quarter' },
+  { value: 'year', label: 'Year' },
+]
+
+function PivotHeaderContextMenu({
+  x,
+  y,
+  columnKey,
+  displayName,
+  currentTruncation,
+  isDateColumn,
+  sortState,
+  onSort,
+  onTruncation,
+  onClose,
+}: {
+  x: number
+  y: number
+  columnKey: string
+  displayName: string
+  currentTruncation: DateTruncation | undefined
+  isDateColumn: boolean
+  sortState: 'asc' | 'desc' | null
+  onSort: (dir: 'asc' | 'desc' | null) => void
+  onTruncation: (col: string, trunc: DateTruncation | undefined) => void
+  onClose: () => void
+}) {
+  const menuRef = useRef<HTMLDivElement>(null)
+  const [showDateSub, setShowDateSub] = useState(false)
+
+  // Clamp position
+  const [pos, setPos] = useState({ top: y, left: x })
+  useLayoutEffect(() => {
+    const menuW = 200
+    const menuH = 220
+    let left = x
+    let top = y
+    if (left + menuW > window.innerWidth - 8) left = window.innerWidth - menuW - 8
+    if (left < 8) left = 8
+    if (top + menuH > window.innerHeight - 8) top = window.innerHeight - menuH - 8
+    if (top < 8) top = 8
+    setPos({ top, left })
+  }, [x, y])
+
+  // Close on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) onClose()
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [onClose])
+
+  // Close on scroll
+  useEffect(() => {
+    const handler = () => onClose()
+    window.addEventListener('scroll', handler, true)
+    return () => window.removeEventListener('scroll', handler, true)
+  }, [onClose])
+
+  return createPortal(
+    <div
+      ref={menuRef}
+      style={{ position: 'fixed', top: pos.top, left: pos.left, zIndex: 9999 }}
+      className="bg-white border border-gray-200 rounded-md shadow-lg w-[200px] py-1 animate-in fade-in zoom-in-95 duration-100"
+    >
+      {/* Sort options */}
+      <button
+        onClick={() => { onSort(sortState === 'asc' ? null : 'asc'); onClose() }}
+        className={cn(
+          'w-full flex items-center gap-2 px-3 py-1.5 text-[11px] transition-colors cursor-pointer',
+          sortState === 'asc' ? 'text-gray-900 bg-gray-50 font-medium' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+        )}
+      >
+        <ArrowUp size={12} className="shrink-0 text-gray-400" />
+        <span>Sort ascending</span>
+      </button>
+      <button
+        onClick={() => { onSort(sortState === 'desc' ? null : 'desc'); onClose() }}
+        className={cn(
+          'w-full flex items-center gap-2 px-3 py-1.5 text-[11px] transition-colors cursor-pointer',
+          sortState === 'desc' ? 'text-gray-900 bg-gray-50 font-medium' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+        )}
+      >
+        <ArrowDown size={12} className="shrink-0 text-gray-400" />
+        <span>Sort descending</span>
+      </button>
+
+      {sortState !== null && (
+        <button
+          onClick={() => { onSort(null); onClose() }}
+          className="w-full flex items-center gap-2 px-3 py-1.5 text-[11px] text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-colors cursor-pointer"
+        >
+          <X size={12} className="shrink-0 text-gray-400" />
+          <span>Clear sort</span>
+        </button>
+      )}
+
+      {/* Date truncation section */}
+      {isDateColumn && (
+        <>
+          <div className="my-1 border-t border-gray-100" />
+          <div className="relative">
+            <button
+              onMouseEnter={() => setShowDateSub(true)}
+              onClick={() => setShowDateSub((v) => !v)}
+              className={cn(
+                'w-full flex items-center gap-2 px-3 py-1.5 text-[11px] transition-colors cursor-pointer',
+                currentTruncation && currentTruncation !== 'none'
+                  ? 'text-gray-900 bg-gray-50 font-medium'
+                  : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+              )}
+            >
+              <Calendar size={12} className="shrink-0 text-gray-400" />
+              <span className="flex-1 text-left">
+                Date truncation
+                {currentTruncation && currentTruncation !== 'none' && (
+                  <span className="ml-1 text-gray-400 font-normal">({DATE_TRUNCATION_OPTIONS.find((o) => o.value === currentTruncation)?.label})</span>
+                )}
+              </span>
+              <ChevronRight size={10} className="shrink-0 text-gray-400" />
+            </button>
+
+            {/* Submenu */}
+            {showDateSub && (
+              <div
+                className="absolute left-full top-0 ml-1 bg-white border border-gray-200 rounded-md shadow-lg w-[150px] py-1 animate-in fade-in zoom-in-95 duration-100"
+                onMouseLeave={() => setShowDateSub(false)}
+              >
+                {DATE_TRUNCATION_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.value}
+                    onClick={() => {
+                      onTruncation(columnKey, opt.value === 'none' ? undefined : opt.value)
+                      onClose()
+                    }}
+                    className={cn(
+                      'w-full flex items-center gap-2 px-3 py-1.5 text-[11px] transition-colors cursor-pointer',
+                      (currentTruncation || 'none') === opt.value
+                        ? 'text-gray-900 bg-gray-50 font-medium'
+                        : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                    )}
+                  >
+                    {opt.value === 'hour' && <Clock size={11} className="shrink-0 text-gray-400" />}
+                    {opt.value !== 'hour' && opt.value !== 'none' && <Calendar size={11} className="shrink-0 text-gray-400" />}
+                    {opt.value === 'none' && <X size={11} className="shrink-0 text-gray-400" />}
+                    <span>{opt.label}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
+      {/* Remove truncation if currently set */}
+      {currentTruncation && currentTruncation !== 'none' && (
+        <button
+          onClick={() => { onTruncation(columnKey, undefined); onClose() }}
+          className="w-full flex items-center gap-2 px-3 py-1.5 text-[11px] text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-colors cursor-pointer"
+        >
+          <X size={12} className="shrink-0 text-gray-400" />
+          <span>Remove truncation</span>
+        </button>
+      )}
+    </div>,
+    document.body
+  )
+}
+
 function FilterPanel({
   filters,
   columns,
@@ -2412,6 +2631,7 @@ function WidgetCard({
   accessToken,
   isFullWidth,
   editMode,
+  globalFetchKey,
   onRemove,
   onDuplicate,
   onToggleFullWidth,
@@ -2430,6 +2650,7 @@ function WidgetCard({
   accessToken: string | null
   isFullWidth: boolean
   editMode: boolean
+  globalFetchKey: number
   onRemove: () => void
   onDuplicate: () => void
   onToggleFullWidth: () => void
@@ -2509,24 +2730,12 @@ function WidgetCard({
 
     const load = async () => {
       try {
-        let documents
-        if (table.isCollectionGroup) {
-          const result = await fetchCollectionGroup(
-            accessToken,
-            table.projectId,
-            table.collectionPath,
-            100
-          )
-          documents = result.documents
-        } else {
-          const result = await fetchDocuments(
-            accessToken,
-            table.projectId,
-            table.collectionPath,
-            100
-          )
-          documents = result.documents
-        }
+        const documents = await fetchAllDocuments(
+          accessToken,
+          table.projectId,
+          table.collectionPath,
+          { isCollectionGroup: table.isCollectionGroup, isCancelled: () => cancelled }
+        )
 
         if (cancelled) return
 
@@ -2553,7 +2762,7 @@ function WidgetCard({
 
     load()
     return () => { cancelled = true }
-  }, [table?.id, accessToken, fetchKey])
+  }, [table?.id, accessToken, fetchKey, globalFetchKey])
 
   const handleRetry = useCallback(() => {
     setFetchKey((k) => k + 1)
@@ -2702,11 +2911,10 @@ function WidgetCard({
     <div className="h-full bg-white rounded-md border border-gray-200 flex flex-col overflow-hidden shadow-sm hover:shadow-md transition-shadow">
       {/* Widget Header — draggable in edit mode */}
       <div className={cn(
-        'widget-drag-handle flex items-center justify-between px-3 py-2 border-b border-gray-100 bg-gray-50/50 shrink-0 select-none',
+        'widget-drag-handle flex items-center justify-between px-3 py-2 shrink-0 select-none',
         editMode ? 'cursor-grab active:cursor-grabbing' : 'cursor-default'
       )}>
         <div className="flex items-center gap-2 min-w-0">
-          {editMode && <GripVertical size={14} className="text-gray-300 shrink-0" />}
           {editingTitle && editMode ? (
             <input
               ref={titleInputRef}
@@ -2827,7 +3035,8 @@ function WidgetCard({
             </button>
           </div>
         ) : previewCols.length > 0 ? (
-          <div className="overflow-auto h-full px-3">
+          <div className="overflow-auto h-full px-3 pb-3">
+            <div className="border border-gray-200 rounded-md overflow-hidden [&_tbody_tr:last-child_td]:border-b-0">
             <table className="w-full text-[11px]">
               <thead className="sticky top-0 z-10">
                 <tr className="bg-gray-50">
@@ -2969,6 +3178,7 @@ function WidgetCard({
                 )}
               </tbody>
             </table>
+            </div>
           </div>
         ) : (
           <div className="h-full flex items-center justify-center">
@@ -3368,9 +3578,11 @@ function ordinal(n: number): string {
 function formatDatePretty(d: Date, trunc: DateTruncation = 'day'): string {
   switch (trunc) {
     case 'year': return String(d.getFullYear())
+    case 'quarter': return `Q${Math.floor(d.getMonth() / 3) + 1} ${d.getFullYear()}`
     case 'month': return `${MONTH_SHORT[d.getMonth()]} ${d.getFullYear()}`
     case 'week':
     case 'day': return `${MONTH_SHORT[d.getMonth()]} ${ordinal(d.getDate())}`
+    case 'hour': return `${MONTH_SHORT[d.getMonth()]} ${ordinal(d.getDate())} ${String(d.getHours()).padStart(2, '0')}:00`
     default: return `${MONTH_SHORT[d.getMonth()]} ${ordinal(d.getDate())}, ${d.getFullYear()}`
   }
 }
@@ -3378,6 +3590,7 @@ function formatDatePretty(d: Date, trunc: DateTruncation = 'day'): string {
 /** Truncate a date to a period boundary for grouping */
 function truncateDate(d: Date, trunc: DateTruncation): Date {
   switch (trunc) {
+    case 'hour': return new Date(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours())
     case 'day': return new Date(d.getFullYear(), d.getMonth(), d.getDate())
     case 'week': {
       const day = d.getDay() // 0=Sun
@@ -3385,6 +3598,7 @@ function truncateDate(d: Date, trunc: DateTruncation): Date {
       return new Date(d.getFullYear(), d.getMonth(), diff)
     }
     case 'month': return new Date(d.getFullYear(), d.getMonth(), 1)
+    case 'quarter': return new Date(d.getFullYear(), Math.floor(d.getMonth() / 3) * 3, 1)
     case 'year': return new Date(d.getFullYear(), 0, 1)
     default: return d
   }
@@ -3459,6 +3673,7 @@ function MetricCard({
   savedTables,
   accessToken,
   editMode,
+  globalFetchKey,
   onRemove,
   onDuplicate,
   onOpenConfig,
@@ -3469,6 +3684,7 @@ function MetricCard({
   savedTables: SavedTable[]
   accessToken: string | null
   editMode: boolean
+  globalFetchKey: number
   onRemove: () => void
   onDuplicate: () => void
   onOpenConfig: () => void
@@ -3520,14 +3736,10 @@ function MetricCard({
 
     const load = async () => {
       try {
-        let documents
-        if (table.isCollectionGroup) {
-          const result = await fetchCollectionGroup(accessToken, table.projectId, table.collectionPath, 500)
-          documents = result.documents
-        } else {
-          const result = await fetchDocuments(accessToken, table.projectId, table.collectionPath, 500)
-          documents = result.documents
-        }
+        const documents = await fetchAllDocuments(accessToken, table.projectId, table.collectionPath, {
+          isCollectionGroup: table.isCollectionGroup,
+          isCancelled: () => cancelled,
+        })
         if (cancelled) return
         const flattened = documents.map((d) => {
           const { __id, __path, __parentId, ...rest } = d
@@ -3541,7 +3753,7 @@ function MetricCard({
     }
     load()
     return () => { cancelled = true }
-  }, [isConfigured ? config?.tableId : null, accessToken, savedTables])
+  }, [isConfigured ? config?.tableId : null, accessToken, savedTables, globalFetchKey])
 
   const filteredRows = applyWidgetFilters(rows, widget.filters)
   const computedValue = isConfigured && filteredRows.length > 0 ? computeMetric(filteredRows, config!) : null
@@ -3831,6 +4043,7 @@ function ChartCard({
   savedTables,
   accessToken,
   editMode,
+  globalFetchKey,
   onRemove,
   onDuplicate,
   onOpenConfig,
@@ -3841,6 +4054,7 @@ function ChartCard({
   savedTables: SavedTable[]
   accessToken: string | null
   editMode: boolean
+  globalFetchKey: number
   onRemove: () => void
   onDuplicate: () => void
   onOpenConfig: () => void
@@ -3897,14 +4111,10 @@ function ChartCard({
 
     const load = async () => {
       try {
-        let documents
-        if (table.isCollectionGroup) {
-          const result = await fetchCollectionGroup(accessToken, table.projectId, table.collectionPath, 500)
-          documents = result.documents
-        } else {
-          const result = await fetchDocuments(accessToken, table.projectId, table.collectionPath, 500)
-          documents = result.documents
-        }
+        const documents = await fetchAllDocuments(accessToken, table.projectId, table.collectionPath, {
+          isCollectionGroup: table.isCollectionGroup,
+          isCancelled: () => cancelled,
+        })
         if (cancelled) return
         const flattened = documents.map((d) => {
           const { __id, __path, __parentId, ...rest } = d
@@ -3925,7 +4135,7 @@ function ChartCard({
 
     load()
     return () => { cancelled = true }
-  }, [isConfigured ? config?.tableId : null, accessToken, savedTables])
+  }, [isConfigured ? config?.tableId : null, accessToken, savedTables, globalFetchKey])
 
   const filteredRows = applyWidgetFilters(rows, widget.filters)
   const chartData = isConfigured && filteredRows.length > 0 ? buildChartData(filteredRows, config!) : []
@@ -3939,11 +4149,10 @@ function ChartCard({
     <div className="h-full bg-white rounded-md border border-gray-200 flex flex-col overflow-hidden shadow-sm hover:shadow-md transition-shadow group/chart">
       {/* Header */}
       <div className={cn(
-        'widget-drag-handle flex items-center justify-between px-3 py-2 border-b border-gray-100 bg-gray-50/50 shrink-0 select-none',
+        'widget-drag-handle flex items-center justify-between px-3 py-2 shrink-0 select-none',
         editMode ? 'cursor-grab active:cursor-grabbing' : 'cursor-default'
       )}>
         <div className="flex items-center gap-2 min-w-0">
-          {editMode && <GripVertical size={14} className="text-gray-300 shrink-0" />}
           {editingTitle && editMode ? (
             <input
               ref={titleInputRef}
@@ -5912,10 +6121,26 @@ function PivotConfigPanel({
   const [draftRowCols, setDraftRowCols] = useState<string[]>(config?.rowColumns ?? [])
   const [draftColCols, setDraftColCols] = useState<string[]>(config?.colColumns ?? [])
   const [draftValues, setDraftValues] = useState<PivotValueConfig[]>(config?.values ?? [])
+  const [draftValuesPlacement, setDraftValuesPlacement] = useState<ValuesPlacement>(config?.valuesPlacement ?? 'columns')
   const [activeTab, setActiveTab] = useState<PivotPanelTab>('properties')
   const [colSearch, setColSearch] = useState('')
   const [showColPicker, setShowColPicker] = useState<'row' | 'col' | null>(null)
   const [showValuePicker, setShowValuePicker] = useState(false)
+
+  // Preserve fields managed outside the config panel (labels, truncations, filters)
+  const preservedFieldsRef = useRef<Pick<PivotConfig, 'rowColumnLabels' | 'columnTruncations' | 'columnFilters'>>({
+    rowColumnLabels: config?.rowColumnLabels,
+    columnTruncations: config?.columnTruncations,
+    columnFilters: config?.columnFilters,
+  })
+  // Keep ref in sync with latest widget prop
+  useEffect(() => {
+    preservedFieldsRef.current = {
+      rowColumnLabels: widget.pivotConfig?.rowColumnLabels,
+      columnTruncations: widget.pivotConfig?.columnTruncations,
+      columnFilters: widget.pivotConfig?.columnFilters,
+    }
+  }, [widget.pivotConfig?.rowColumnLabels, widget.pivotConfig?.columnTruncations, widget.pivotConfig?.columnFilters])
 
   const draftTable = savedTables.find((t) => t.id === draftTableId)
   const draftColumns = draftTable?.columns.filter((c) => c.visible) ?? []
@@ -5934,10 +6159,13 @@ function PivotConfigPanel({
       rowColumns: draftRowCols,
       colColumns: draftColCols,
       values: draftValues,
+      valuesPlacement: draftValuesPlacement,
+      // Preserve fields managed outside the config panel
+      ...preservedFieldsRef.current,
     }
     onApply(newConfig)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draftTableId, draftRowCols, draftColCols, draftValues])
+  }, [draftTableId, draftRowCols, draftColCols, draftValues, draftValuesPlacement])
 
   const addValue = (column: string) => {
     setDraftValues((prev) => [...prev, { id: `pv-${Date.now()}`, column, aggregation: 'count' }])
@@ -6197,6 +6425,37 @@ function PivotConfigPanel({
                     )}
                     {showValuePicker && renderValuePicker()}
                   </div>
+
+                  {/* Values Placement toggle — only relevant when multiple values + col groups */}
+                  {draftValues.length > 0 && (
+                    <div className="mt-3">
+                      <label className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5 block">Show Values In</label>
+                      <div className="flex items-center bg-gray-100 p-0.5 rounded-md w-fit">
+                        <button
+                          onClick={() => setDraftValuesPlacement('columns')}
+                          className={cn(
+                            'flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-md transition-colors',
+                            draftValuesPlacement === 'columns'
+                              ? 'text-gray-800 bg-white shadow-sm'
+                              : 'text-gray-600 hover:bg-gray-200/70'
+                          )}
+                        >
+                          Columns
+                        </button>
+                        <button
+                          onClick={() => setDraftValuesPlacement('rows')}
+                          className={cn(
+                            'flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-md transition-colors',
+                            draftValuesPlacement === 'rows'
+                              ? 'text-gray-800 bg-white shadow-sm'
+                              : 'text-gray-600 hover:bg-gray-200/70'
+                          )}
+                        >
+                          Rows
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </>
               )}
             </div>
@@ -6290,6 +6549,212 @@ function PivotConfigPanel({
   )
 }
 
+/* ───────── Column Filter Popover ───────── */
+
+function ColumnFilterPopover({
+  anchorRect,
+  columnKey,
+  displayName,
+  allRows,
+  currentFilter,
+  onApply,
+  onClose,
+}: {
+  anchorRect: DOMRect
+  columnKey: string
+  displayName: string
+  allRows: Record<string, unknown>[]
+  currentFilter: PivotColumnFilter | undefined
+  onApply: (columnKey: string, filter: PivotColumnFilter | undefined) => void
+  onClose: () => void
+}) {
+  const menuRef = useRef<HTMLDivElement>(null)
+  const [search, setSearch] = useState('')
+  const [excludeNulls, setExcludeNulls] = useState(currentFilter?.excludeNulls ?? false)
+  const [excludeBlanks, setExcludeBlanks] = useState(currentFilter?.excludeBlanks ?? false)
+  const [excludeValues, setExcludeValues] = useState<Set<string>>(new Set(currentFilter?.excludeValues ?? []))
+
+  // Compute unique values for this column
+  const uniqueValues = useMemo(() => {
+    const valMap = new Map<string, { raw: unknown; count: number }>()
+    let nullCount = 0
+    let blankCount = 0
+    for (const row of allRows) {
+      const raw = row[columnKey]
+      if (raw == null) { nullCount++; continue }
+      const str = String(raw)
+      if (str.trim() === '') { blankCount++; continue }
+      if (valMap.has(str)) valMap.get(str)!.count++
+      else valMap.set(str, { raw, count: 1 })
+    }
+    const sorted = [...valMap.entries()].sort((a, b) => a[0].localeCompare(b[0]))
+    return { values: sorted, nullCount, blankCount }
+  }, [allRows, columnKey])
+
+  const filteredValues = useMemo(() => {
+    if (!search) return uniqueValues.values
+    const lower = search.toLowerCase()
+    return uniqueValues.values.filter(([str]) => str.toLowerCase().includes(lower))
+  }, [uniqueValues.values, search])
+
+  // Close on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) onClose()
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [onClose])
+
+  const toggleValue = (str: string) => {
+    setExcludeValues((prev) => {
+      const next = new Set(prev)
+      if (next.has(str)) next.delete(str)
+      else next.add(str)
+      return next
+    })
+  }
+
+  const selectAll = () => {
+    setExcludeValues(new Set())
+    setExcludeNulls(false)
+    setExcludeBlanks(false)
+  }
+
+  const selectNone = () => {
+    setExcludeValues(new Set(uniqueValues.values.map(([str]) => str)))
+    setExcludeNulls(true)
+    setExcludeBlanks(true)
+  }
+
+  const handleApply = () => {
+    const hasExcludes = excludeNulls || excludeBlanks || excludeValues.size > 0
+    if (!hasExcludes) {
+      onApply(columnKey, undefined)  // clear filter
+    } else {
+      onApply(columnKey, {
+        excludeNulls: excludeNulls || undefined,
+        excludeBlanks: excludeBlanks || undefined,
+        excludeValues: excludeValues.size > 0 ? [...excludeValues] : undefined,
+      })
+    }
+    onClose()
+  }
+
+  // Position below the anchor
+  const top = Math.min(anchorRect.bottom + 4, window.innerHeight - 380)
+  const left = Math.min(anchorRect.left, window.innerWidth - 260)
+
+  const isFiltered = excludeNulls || excludeBlanks || excludeValues.size > 0
+
+  return createPortal(
+    <div
+      ref={menuRef}
+      style={{ position: 'fixed', top, left, zIndex: 9999 }}
+      className="bg-white border border-gray-200 rounded-md shadow-lg w-[250px] animate-in fade-in zoom-in-95 duration-100 flex flex-col"
+    >
+      {/* Header */}
+      <div className="px-3 py-2 border-b border-gray-100 flex items-center justify-between">
+        <span className="text-xs font-semibold text-gray-700 truncate">{displayName}</span>
+        <button onClick={onClose} className="p-0.5 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-600 cursor-pointer">
+          <X size={12} />
+        </button>
+      </div>
+
+      {/* Search */}
+      <div className="px-3 py-2 border-b border-gray-100">
+        <div className="flex items-center gap-1.5 bg-gray-50 border border-gray-200 rounded-md px-2 py-1.5">
+          <Search size={11} className="text-gray-400 shrink-0" />
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search values..."
+            className="text-xs bg-transparent outline-none flex-1 text-gray-700 placeholder-gray-400"
+          />
+        </div>
+      </div>
+
+      {/* Select All / None */}
+      <div className="px-3 py-1.5 flex items-center gap-2 border-b border-gray-100">
+        <button onClick={selectAll} className="text-[10px] text-blue-600 hover:text-blue-700 font-medium cursor-pointer">Select All</button>
+        <span className="text-gray-300">|</span>
+        <button onClick={selectNone} className="text-[10px] text-blue-600 hover:text-blue-700 font-medium cursor-pointer">Select None</button>
+        {isFiltered && (
+          <>
+            <span className="text-gray-300">|</span>
+            <button onClick={selectAll} className="text-[10px] text-red-500 hover:text-red-600 font-medium cursor-pointer">Clear Filter</button>
+          </>
+        )}
+      </div>
+
+      {/* Values list */}
+      <div className="max-h-[200px] overflow-y-auto py-1">
+        {/* Null option */}
+        {uniqueValues.nullCount > 0 && (
+          <label className="flex items-center gap-2 px-3 py-1 hover:bg-gray-50 cursor-pointer">
+            <input type="checkbox" checked={!excludeNulls} onChange={() => setExcludeNulls(!excludeNulls)} className="rounded border-gray-300 text-blue-600 h-3 w-3" />
+            <span className="text-xs text-gray-500 italic flex-1">(null)</span>
+            <span className="text-[10px] text-gray-400">{uniqueValues.nullCount}</span>
+          </label>
+        )}
+
+        {/* Blank option */}
+        {uniqueValues.blankCount > 0 && (
+          <label className="flex items-center gap-2 px-3 py-1 hover:bg-gray-50 cursor-pointer">
+            <input type="checkbox" checked={!excludeBlanks} onChange={() => setExcludeBlanks(!excludeBlanks)} className="rounded border-gray-300 text-blue-600 h-3 w-3" />
+            <span className="text-xs text-gray-500 italic flex-1">(blank)</span>
+            <span className="text-[10px] text-gray-400">{uniqueValues.blankCount}</span>
+          </label>
+        )}
+
+        {/* Actual values */}
+        {filteredValues.map(([str, { count }]) => (
+          <label key={str} className="flex items-center gap-2 px-3 py-1 hover:bg-gray-50 cursor-pointer">
+            <input type="checkbox" checked={!excludeValues.has(str)} onChange={() => toggleValue(str)} className="rounded border-gray-300 text-blue-600 h-3 w-3" />
+            <span className="text-xs text-gray-700 truncate flex-1">{str}</span>
+            <span className="text-[10px] text-gray-400">{count}</span>
+          </label>
+        ))}
+
+        {filteredValues.length === 0 && uniqueValues.nullCount === 0 && uniqueValues.blankCount === 0 && (
+          <p className="text-xs text-gray-400 italic px-3 py-2">No values</p>
+        )}
+      </div>
+
+      {/* Apply button */}
+      <div className="px-3 py-2 border-t border-gray-100">
+        <button
+          onClick={handleApply}
+          className="w-full bg-gray-900 text-white text-xs font-medium py-1.5 rounded-md hover:bg-gray-800 transition-colors cursor-pointer"
+        >
+          Apply Filter
+        </button>
+      </div>
+    </div>,
+    document.body
+  )
+}
+
+/* ───────── Error Boundary for Pivot Tables ───────── */
+class PivotErrorBoundary extends React.Component<{ children: React.ReactNode }, { error: Error | null }> {
+  state = { error: null as Error | null }
+  static getDerivedStateFromError(error: Error) { return { error } }
+  componentDidCatch(error: Error, info: React.ErrorInfo) { console.error('[PivotCard crash]', error, info) }
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="p-4 text-xs text-red-600 bg-white rounded-md border border-red-200">
+          <p className="font-semibold mb-1">Pivot table error</p>
+          <p className="text-red-500">{this.state.error.message}</p>
+          <button onClick={() => this.setState({ error: null })} className="mt-2 text-blue-600 hover:underline text-[10px] cursor-pointer">Try again</button>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
+
 /* ───────── Pivot Table Card ───────── */
 
 function PivotCard({
@@ -6297,6 +6762,7 @@ function PivotCard({
   savedTables,
   accessToken,
   editMode,
+  globalFetchKey,
   onRemove,
   onDuplicate,
   onOpenConfig,
@@ -6309,6 +6775,7 @@ function PivotCard({
   savedTables: SavedTable[]
   accessToken: string | null
   editMode: boolean
+  globalFetchKey: number
   onRemove: () => void
   onDuplicate: () => void
   onOpenConfig: () => void
@@ -6340,6 +6807,56 @@ function PivotCard({
   // Quick column format toolbar state
   const [pivotFmtCol, setPivotFmtCol] = useState<string | null>(null)
   const [pivotFmtRect, setPivotFmtRect] = useState<{ top: number; left: number; width: number; bottom: number } | null>(null)
+
+  // Right-click context menu state
+  const [pivotCtxMenu, setPivotCtxMenu] = useState<{
+    x: number; y: number; columnKey: string; displayName: string; colIdx: number
+  } | null>(null)
+
+  // Column filter popover state
+  const [filterPopover, setFilterPopover] = useState<{
+    columnKey: string; displayName: string; anchorRect: DOMRect
+  } | null>(null)
+
+  const handleFilterApply = useCallback((col: string, filter: PivotColumnFilter | undefined) => {
+    if (!config) return
+    const prev = config.columnFilters || {}
+    if (!filter) {
+      const next = { ...prev }
+      delete next[col]
+      onPivotConfigChange({ ...config, columnFilters: Object.keys(next).length > 0 ? next : undefined })
+    } else {
+      onPivotConfigChange({ ...config, columnFilters: { ...prev, [col]: filter } })
+    }
+  }, [config, onPivotConfigChange])
+
+  // Detect if a column contains date values
+  const dateColumnCache = useMemo(() => {
+    const cache: Record<string, boolean> = {}
+    if (!rows.length) return cache
+    const sampleSize = Math.min(rows.length, 20)
+    const allCols = [...(config?.rowColumns || []), ...(config?.colColumns || [])]
+    for (const col of allCols) {
+      let dateCount = 0
+      for (let i = 0; i < sampleSize; i++) {
+        if (looksLikeDate(rows[i]?.[col])) dateCount++
+      }
+      cache[col] = dateCount > sampleSize * 0.3
+    }
+    return cache
+  }, [rows, config?.rowColumns, config?.colColumns])
+
+  const handleTruncationChange = useCallback((col: string, trunc: DateTruncation | undefined) => {
+    if (!config) return
+    const prev = config.columnTruncations || {}
+    if (trunc === undefined) {
+      const next = { ...prev }
+      delete next[col]
+      onPivotConfigChange({ ...config, columnTruncations: next })
+    } else {
+      onPivotConfigChange({ ...config, columnTruncations: { ...prev, [col]: trunc } })
+    }
+  }, [config, onPivotConfigChange])
 
   const openPivotFmtToolbar = useCallback((colKey: string, thElement: HTMLElement) => {
     const rect = thElement.getBoundingClientRect()
@@ -6416,14 +6933,10 @@ function PivotCard({
 
     const load = async () => {
       try {
-        let documents
-        if (table.isCollectionGroup) {
-          const result = await fetchCollectionGroup(accessToken, table.projectId, table.collectionPath, 1000)
-          documents = result.documents
-        } else {
-          const result = await fetchDocuments(accessToken, table.projectId, table.collectionPath, 1000)
-          documents = result.documents
-        }
+        const documents = await fetchAllDocuments(accessToken, table.projectId, table.collectionPath, {
+          isCollectionGroup: table.isCollectionGroup,
+          isCancelled: () => cancelled,
+        })
         if (cancelled) return
         const flattened = documents.map((d: Record<string, unknown>) => {
           const { __id: _id, __path: _p, __parentId: _pid, ...rest } = d
@@ -6437,10 +6950,71 @@ function PivotCard({
     }
     load()
     return () => { cancelled = true }
-  }, [config?.tableId, table, accessToken])
+  }, [config?.tableId, table, accessToken, globalFetchKey])
 
   // Compute pivot data
   const pivotData = usePivotData(rows, config)
+
+  // Sort state
+  const [pivotSortCol, setPivotSortCol] = useState<number | null>(null) // index into combined [rowHeaders..., valueHeaders...]
+  const [pivotSortDir, setPivotSortDir] = useState<'asc' | 'desc' | null>(null)
+
+  const togglePivotSort = useCallback((colIdx: number) => {
+    if (pivotSortCol === colIdx) {
+      if (pivotSortDir === 'asc') setPivotSortDir('desc')
+      else if (pivotSortDir === 'desc') { setPivotSortDir(null); setPivotSortCol(null) }
+      else { setPivotSortDir('asc') }
+    } else {
+      setPivotSortCol(colIdx)
+      setPivotSortDir('asc')
+    }
+  }, [pivotSortCol, pivotSortDir])
+
+  const sortedPivotRows = useMemo(() => {
+    if (pivotSortCol === null || pivotSortDir === null) return pivotData.rows
+    const rowHeaderCount = pivotData.rowHeaders.length
+    const isRowCol = pivotSortCol < rowHeaderCount
+    return [...pivotData.rows].sort((a, b) => {
+      const aVal = isRowCol ? a.keys[pivotSortCol] : a.values[pivotSortCol - rowHeaderCount]
+      const bVal = isRowCol ? b.keys[pivotSortCol] : b.values[pivotSortCol - rowHeaderCount]
+      if (aVal == null && bVal == null) return 0
+      if (aVal == null) return 1
+      if (bVal == null) return -1
+      if (typeof aVal === 'number' && typeof bVal === 'number') {
+        return pivotSortDir === 'asc' ? aVal - bVal : bVal - aVal
+      }
+      // Try date comparison for date-like strings
+      const aDate = parseDate(aVal)
+      const bDate = parseDate(bVal)
+      if (aDate && bDate) {
+        const diff = aDate.getTime() - bDate.getTime()
+        return pivotSortDir === 'asc' ? diff : -diff
+      }
+      const cmp = String(aVal).localeCompare(String(bVal))
+      return pivotSortDir === 'asc' ? cmp : -cmp
+    })
+  }, [pivotData.rows, pivotData.rowHeaders.length, pivotSortCol, pivotSortDir])
+
+  // Inline rename state — row column headers
+  const [editingRowColIdx, setEditingRowColIdx] = useState<number | null>(null)
+  const [draftRowColLabel, setDraftRowColLabel] = useState('')
+  const rowColInputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (editingRowColIdx !== null) setTimeout(() => { rowColInputRef.current?.focus(); rowColInputRef.current?.select() }, 50)
+  }, [editingRowColIdx])
+
+  const commitRowColLabel = () => {
+    if (editingRowColIdx === null || !config) { setEditingRowColIdx(null); return }
+    setEditingRowColIdx(null)
+    const trimmed = draftRowColLabel.trim()
+    if (!trimmed) return
+    const updatedRowColumns = [...config.rowColumns]
+    // Store the display label as a columnLabel map on the config
+    const labels = { ...(config.rowColumnLabels || {}) }
+    labels[config.rowColumns[editingRowColIdx]] = trimmed
+    onPivotConfigChange({ ...config, rowColumnLabels: labels })
+  }
 
   const commitTitle = () => {
     setEditingTitle(false)
@@ -6474,11 +7048,10 @@ function PivotCard({
       <div className="h-full flex flex-col bg-white rounded-md border border-gray-200 overflow-hidden relative group/el">
         {/* Header — drag handle */}
         <div className={cn(
-          'widget-drag-handle flex items-center justify-between px-3 py-2 border-b border-gray-100 bg-gray-50/50 shrink-0 select-none',
+          'widget-drag-handle flex items-center justify-between px-3 py-2 shrink-0 select-none',
           editMode ? 'cursor-grab active:cursor-grabbing' : 'cursor-default'
         )}>
           <div className="flex items-center gap-2 min-w-0">
-            {editMode && <GripVertical size={14} className="text-gray-300 shrink-0" />}
             <Grid3X3 size={13} className="text-gray-400 shrink-0" />
             <span className="text-xs font-medium text-gray-700 truncate">{displayTitle}</span>
           </div>
@@ -6511,11 +7084,10 @@ function PivotCard({
     <div className="h-full flex flex-col bg-white rounded-md border border-gray-200 overflow-hidden relative group/el">
       {/* Header — drag handle */}
       <div className={cn(
-        'widget-drag-handle flex items-center justify-between px-4 py-2.5 border-b border-gray-100 shrink-0 select-none',
+        'widget-drag-handle flex items-center justify-between px-4 py-2.5 shrink-0 select-none',
         editMode ? 'cursor-grab active:cursor-grabbing' : 'cursor-default'
       )}>
         <div className="flex items-center gap-2 min-w-0">
-          {editMode && <GripVertical size={14} className="text-gray-300 shrink-0" />}
           {editingTitle && editMode ? (
             <input
               ref={titleInputRef}
@@ -6555,7 +7127,7 @@ function PivotCard({
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-auto px-3">
+      <div className="flex-1 overflow-auto px-3 pb-3">
         {loading ? (
           <div className="flex items-center justify-center h-full gap-2 text-xs text-gray-400">
             <Loader2 size={14} className="animate-spin" />Loading…
@@ -6566,9 +7138,10 @@ function PivotCard({
           </div>
         ) : pivotData.headers.length === 0 ? (
           <div className="flex items-center justify-center h-full text-xs text-gray-400">
-            Add row fields, column fields, and values to build the pivot
+            Add values to build the pivot table
           </div>
         ) : (
+          <div className="border border-gray-200 rounded-md overflow-auto [&_th:last-child]:border-r-0 [&_td:last-child]:border-r-0 [&_tbody_tr:last-child_td]:border-b-0">
           <table className="text-xs border-collapse" style={{ tableLayout: 'fixed', minWidth: '100%' }}>
             <colgroup>
               {pivotData.rowHeaders.map((_, ri) => (
@@ -6580,16 +7153,63 @@ function PivotCard({
               })}
             </colgroup>
             <thead>
+              {/* ── Row 1: Row headers + Column group spans (or flat headers if no col groups) ── */}
               <tr className="bg-gray-50/80">
-                {pivotData.rowHeaders.map((rh, ri) => (
+                {pivotData.rowHeaders.map((rh, ri) => {
+                  const displayLabel = config?.rowColumnLabels?.[rh] || rh
+                  const isSorted = pivotSortCol === ri
+                  const hasTrunc = config?.columnTruncations?.[rh]
+                  return (
                   <th
                     key={rh}
                     ref={(el) => { if (el) thRefs.current.set(ri, el); else thRefs.current.delete(ri) }}
+                    rowSpan={pivotData.hasColGroups ? 2 : 1}
                     className="text-left px-3 py-2.5 text-xs font-medium text-gray-600 border-b border-r border-gray-200 sticky top-0 bg-gray-200/70 relative select-none overflow-hidden text-ellipsis whitespace-nowrap group/th cursor-pointer"
-                    onClick={() => { if (editMode) onColumnSelect(rh) }}
+                    onContextMenu={(e) => {
+                      e.preventDefault()
+                      setPivotCtxMenu({ x: e.clientX, y: e.clientY, columnKey: rh, displayName: displayLabel, colIdx: ri })
+                    }}
+                    onClick={() => {
+                      if (editingRowColIdx === ri) return
+                      togglePivotSort(ri)
+                    }}
                   >
-                    <span className="inline-flex items-center gap-1">
-                      {rh}
+                    {editingRowColIdx === ri && editMode ? (
+                      <input
+                        ref={rowColInputRef}
+                        type="text"
+                        value={draftRowColLabel}
+                        onChange={(e) => setDraftRowColLabel(e.target.value)}
+                        onBlur={commitRowColLabel}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') commitRowColLabel()
+                          if (e.key === 'Escape') setEditingRowColIdx(null)
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                        onMouseDown={(e) => e.stopPropagation()}
+                        className="w-full text-[10px] font-semibold text-gray-900 bg-transparent border-b border-gray-400 focus:border-gray-600 focus:outline-none py-0"
+                      />
+                    ) : (
+                    <span
+                      className={cn('inline-flex items-center gap-1', editMode && 'cursor-text hover:text-gray-700')}
+                      onDoubleClick={(e) => {
+                        if (!editMode) return
+                        e.stopPropagation()
+                        setDraftRowColLabel(displayLabel)
+                        setEditingRowColIdx(ri)
+                      }}
+                    >
+                      {displayLabel}
+                      {hasTrunc && hasTrunc !== 'none' && (
+                        <span className="text-[9px] text-gray-400 font-normal">({hasTrunc})</span>
+                      )}
+                      {isSorted && pivotSortDir === 'asc' ? (
+                        <ArrowUp size={10} className="text-gray-700" />
+                      ) : isSorted && pivotSortDir === 'desc' ? (
+                        <ArrowDown size={10} className="text-gray-700" />
+                      ) : (
+                        <ArrowUpDown size={10} className="text-gray-300 opacity-0 group-hover/th:opacity-100 transition-opacity" />
+                      )}
                       {editMode && (
                         <button
                           onClick={(e) => {
@@ -6617,7 +7237,26 @@ function PivotCard({
                           })()}
                         </button>
                       )}
+                      {/* Filter icon */}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          const th = (e.currentTarget as HTMLElement).closest('th')
+                          if (th) setFilterPopover({ columnKey: rh, displayName: displayLabel, anchorRect: th.getBoundingClientRect() })
+                        }}
+                        onMouseDown={(e) => e.stopPropagation()}
+                        className={cn(
+                          'p-0.5 rounded transition-all cursor-pointer',
+                          config?.columnFilters?.[rh]
+                            ? 'text-blue-600 hover:text-blue-700 hover:bg-blue-50'
+                            : 'text-gray-300 opacity-0 group-hover/th:opacity-100 hover:text-gray-500 hover:bg-gray-200/50'
+                        )}
+                        title="Filter column"
+                      >
+                        <Filter size={9} />
+                      </button>
                     </span>
+                    )}
                     {/* Column resize handle */}
                     <div
                       className="absolute right-[-4px] top-0 bottom-0 w-[9px] cursor-col-resize z-20 group/resize"
@@ -6627,93 +7266,190 @@ function PivotCard({
                       <div className="absolute left-1/2 -translate-x-1/2 top-1 bottom-1 w-[2px] rounded-full bg-gray-300 opacity-0 group-hover/resize:opacity-100 transition-opacity" />
                     </div>
                   </th>
-                ))}
-                {pivotData.headers.map((h, i) => {
-                  const ci = pivotData.rowHeaders.length + i
-                  return (
-                    <th
-                      key={i}
-                      ref={(el) => { if (el) thRefs.current.set(ci, el); else thRefs.current.delete(ci) }}
-                      className="text-right px-3 py-2.5 text-xs font-medium text-gray-600 border-b border-r border-gray-200 sticky top-0 bg-gray-50/80 whitespace-nowrap relative select-none overflow-hidden text-ellipsis group/th cursor-pointer"
-                      onClick={() => {
-                        if (!editMode) return
-                        const vc = config?.values[i % (config?.values.length || 1)]
-                        const fk = vc ? (vc.column || vc.id) : String(i)
-                        onColumnSelect(fk)
-                      }}
-                    >
-                      {editingColIdx === i && editMode ? (
-                        <input
-                          ref={colInputRef}
-                          type="text"
-                          value={draftColLabel}
-                          onChange={(e) => setDraftColLabel(e.target.value)}
-                          onBlur={commitColLabel}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') commitColLabel()
-                            if (e.key === 'Escape') setEditingColIdx(null)
-                          }}
-                          onMouseDown={(e) => e.stopPropagation()}
-                          className="w-full text-right text-[10px] font-semibold text-gray-900 bg-transparent border-b border-gray-400 focus:border-gray-600 focus:outline-none py-0"
-                        />
-                      ) : (
-                        <span
-                          className={cn('inline-flex items-center gap-1 justify-end', editMode && 'cursor-text hover:text-gray-700')}
-                          onDoubleClick={() => {
-                            if (!editMode) return
-                            setDraftColLabel(h)
-                            setEditingColIdx(i)
-                          }}
-                        >
-                          {h}
-                          {editMode && (() => {
-                            const vc = config?.values[i % (config?.values.length || 1)]
-                            const fmtKey = vc ? (vc.column || vc.id) : String(i)
-                            return (
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  const th = (e.currentTarget as HTMLElement).closest('th')
-                                  if (th) openPivotFmtToolbar(fmtKey, th)
-                                }}
-                                onMouseDown={(e) => e.stopPropagation()}
-                                className={cn(
-                                  'p-0.5 rounded transition-all cursor-pointer',
-                                  widget.columnFormats?.[fmtKey]
-                                    ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-200/50'
-                                    : 'text-gray-300 opacity-0 group-hover/th:opacity-100 hover:text-gray-500 hover:bg-gray-200/50'
-                                )}
-                                title="Format column"
-                              >
-                                {(() => {
-                                  const ft = widget.columnFormats?.[fmtKey]?.type
-                                  if (ft === 'number') return <Hash size={9} />
-                                  if (ft === 'currency') return <DollarSign size={9} />
-                                  if (ft === 'percent') return <Percent size={9} />
-                                  if (ft === 'date' || ft === 'datetime') return <Calendar size={9} />
-                                  if (ft === 'text') return <CaseSensitive size={9} />
-                                  return <Paintbrush size={9} />
-                                })()}
-                              </button>
-                            )
-                          })()}
-                        </span>
-                      )}
-                      {/* Column resize handle */}
-                      <div
-                        className="absolute right-[-4px] top-0 bottom-0 w-[9px] cursor-col-resize z-20 group/resize"
-                        onMouseDown={(e) => startColResize(ci, e)}
-                        onDoubleClick={(e) => { e.stopPropagation(); setColWidths((prev) => { const next = { ...prev }; delete next[ci]; return next }) }}
-                      >
-                        <div className="absolute left-1/2 -translate-x-1/2 top-1 bottom-1 w-[2px] rounded-full bg-gray-300 opacity-0 group-hover/resize:opacity-100 transition-opacity" />
-                      </div>
-                    </th>
                   )
                 })}
+
+                {pivotData.hasColGroups ? (
+                  /* Column group header cells — span across their value columns */
+                  pivotData.colGroups.map((group, gi) => (
+                    <th
+                      key={`cg-${gi}`}
+                      colSpan={group.span}
+                      className="text-center px-3 py-2 text-xs font-semibold text-gray-700 border-b border-r border-gray-200 sticky top-0 bg-gray-50/80 whitespace-nowrap"
+                    >
+                      {group.label}
+                    </th>
+                  ))
+                ) : (
+                  /* No column groups — flat value headers */
+                  pivotData.headers.map((h, i) => {
+                    const ci = pivotData.rowHeaders.length + i
+                    const isSorted = pivotSortCol === ci
+                    return (
+                      <th
+                        key={i}
+                        ref={(el) => { if (el) thRefs.current.set(ci, el); else thRefs.current.delete(ci) }}
+                        className="text-right px-3 py-2.5 text-xs font-medium text-gray-600 border-b border-r border-gray-200 sticky top-0 bg-gray-50/80 whitespace-nowrap relative select-none overflow-hidden text-ellipsis group/th cursor-pointer"
+                        onContextMenu={(e) => {
+                          e.preventDefault()
+                          const vc = config?.values[i % (config?.values.length || 1)]
+                          const colKey = vc?.column || String(i)
+                          setPivotCtxMenu({ x: e.clientX, y: e.clientY, columnKey: colKey, displayName: h, colIdx: ci })
+                        }}
+                        onClick={() => {
+                          if (editingColIdx === i) return
+                          togglePivotSort(ci)
+                        }}
+                      >
+                        {editingColIdx === i && editMode ? (
+                          <input
+                            ref={colInputRef}
+                            type="text"
+                            value={draftColLabel}
+                            onChange={(e) => setDraftColLabel(e.target.value)}
+                            onBlur={commitColLabel}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') commitColLabel()
+                              if (e.key === 'Escape') setEditingColIdx(null)
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                            onMouseDown={(e) => e.stopPropagation()}
+                            className="w-full text-right text-[10px] font-semibold text-gray-900 bg-transparent border-b border-gray-400 focus:border-gray-600 focus:outline-none py-0"
+                          />
+                        ) : (
+                          <span
+                            className={cn('inline-flex items-center gap-1 justify-end', editMode && 'cursor-text hover:text-gray-700')}
+                            onDoubleClick={(e) => {
+                              if (!editMode) return
+                              e.stopPropagation()
+                              setDraftColLabel(h)
+                              setEditingColIdx(i)
+                            }}
+                          >
+                            {isSorted && pivotSortDir === 'asc' ? (
+                              <ArrowUp size={10} className="text-gray-700" />
+                            ) : isSorted && pivotSortDir === 'desc' ? (
+                              <ArrowDown size={10} className="text-gray-700" />
+                            ) : (
+                              <ArrowUpDown size={10} className="text-gray-300 opacity-0 group-hover/th:opacity-100 transition-opacity" />
+                            )}
+                            {h}
+                            {editMode && (() => {
+                              const vc = config?.values[i % (config?.values.length || 1)]
+                              const fmtKey = vc ? (vc.column || vc.id) : String(i)
+                              return (
+                                <>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    const th = (e.currentTarget as HTMLElement).closest('th')
+                                    if (th) openPivotFmtToolbar(fmtKey, th)
+                                  }}
+                                  onMouseDown={(e) => e.stopPropagation()}
+                                  className={cn(
+                                    'p-0.5 rounded transition-all cursor-pointer',
+                                    widget.columnFormats?.[fmtKey]
+                                      ? 'text-gray-500 hover:text-gray-700 hover:bg-gray-200/50'
+                                      : 'text-gray-300 opacity-0 group-hover/th:opacity-100 hover:text-gray-500 hover:bg-gray-200/50'
+                                  )}
+                                  title="Format column"
+                                >
+                                  {(() => {
+                                    const ft = widget.columnFormats?.[fmtKey]?.type
+                                    if (ft === 'number') return <Hash size={9} />
+                                    if (ft === 'currency') return <DollarSign size={9} />
+                                    if (ft === 'percent') return <Percent size={9} />
+                                    if (ft === 'date' || ft === 'datetime') return <Calendar size={9} />
+                                    if (ft === 'text') return <CaseSensitive size={9} />
+                                    return <Paintbrush size={9} />
+                                  })()}
+                                </button>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    const th = (e.currentTarget as HTMLElement).closest('th')
+                                    if (th) setFilterPopover({ columnKey: fmtKey, displayName: h, anchorRect: th.getBoundingClientRect() })
+                                  }}
+                                  onMouseDown={(e) => e.stopPropagation()}
+                                  className={cn(
+                                    'p-0.5 rounded transition-all cursor-pointer',
+                                    config?.columnFilters?.[fmtKey]
+                                      ? 'text-blue-600 hover:text-blue-700 hover:bg-blue-50'
+                                      : 'text-gray-300 opacity-0 group-hover/th:opacity-100 hover:text-gray-500 hover:bg-gray-200/50'
+                                  )}
+                                  title="Filter column"
+                                >
+                                  <Filter size={9} />
+                                </button>
+                                </>
+                              )
+                            })()}
+                          </span>
+                        )}
+                        {/* Column resize handle */}
+                        <div
+                          className="absolute right-[-4px] top-0 bottom-0 w-[9px] cursor-col-resize z-20 group/resize"
+                          onMouseDown={(e) => startColResize(ci, e)}
+                          onDoubleClick={(e) => { e.stopPropagation(); setColWidths((prev) => { const next = { ...prev }; delete next[ci]; return next }) }}
+                        >
+                          <div className="absolute left-1/2 -translate-x-1/2 top-1 bottom-1 w-[2px] rounded-full bg-gray-300 opacity-0 group-hover/resize:opacity-100 transition-opacity" />
+                        </div>
+                      </th>
+                    )
+                  })
+                )}
               </tr>
+
+              {/* ── Row 2: Value labels under each column group (only when col groups exist) ── */}
+              {pivotData.hasColGroups && (
+                <tr className="bg-gray-50/60">
+                  {pivotData.headers.map((h, i) => {
+                    const ci = pivotData.rowHeaders.length + i
+                    const isSorted = pivotSortCol === ci
+                    const vlIdx = i % pivotData.valueLabels.length
+                    const valueLabel = pivotData.valueLabels[vlIdx]
+                    return (
+                      <th
+                        key={i}
+                        ref={(el) => { if (el) thRefs.current.set(ci, el); else thRefs.current.delete(ci) }}
+                        className="text-right px-3 py-2 text-[10px] font-medium text-gray-500 border-b border-r border-gray-200 sticky top-[29px] bg-gray-50/90 whitespace-nowrap relative select-none overflow-hidden text-ellipsis group/th cursor-pointer"
+                        onContextMenu={(e) => {
+                          e.preventDefault()
+                          const vc = config?.values[vlIdx]
+                          const colKey = vc?.column || String(i)
+                          setPivotCtxMenu({ x: e.clientX, y: e.clientY, columnKey: colKey, displayName: h, colIdx: ci })
+                        }}
+                        onClick={() => {
+                          if (editingColIdx === i) return
+                          togglePivotSort(ci)
+                        }}
+                      >
+                        <span className="inline-flex items-center gap-1 justify-end">
+                          {isSorted && pivotSortDir === 'asc' ? (
+                            <ArrowUp size={9} className="text-gray-600" />
+                          ) : isSorted && pivotSortDir === 'desc' ? (
+                            <ArrowDown size={9} className="text-gray-600" />
+                          ) : (
+                            <ArrowUpDown size={9} className="text-gray-300 opacity-0 group-hover/th:opacity-100 transition-opacity" />
+                          )}
+                          {valueLabel}
+                        </span>
+                        {/* Column resize handle */}
+                        <div
+                          className="absolute right-[-4px] top-0 bottom-0 w-[9px] cursor-col-resize z-20 group/resize"
+                          onMouseDown={(e) => startColResize(ci, e)}
+                          onDoubleClick={(e) => { e.stopPropagation(); setColWidths((prev) => { const next = { ...prev }; delete next[ci]; return next }) }}
+                        >
+                          <div className="absolute left-1/2 -translate-x-1/2 top-1 bottom-1 w-[2px] rounded-full bg-gray-300 opacity-0 group-hover/resize:opacity-100 transition-opacity" />
+                        </div>
+                      </th>
+                    )
+                  })}
+                </tr>
+              )}
             </thead>
             <tbody>
-              {pivotData.rows.map((row, ri) => {
+              {sortedPivotRows.map((row, ri) => {
                 // Build a synthetic row object for conditional formatting evaluation
                 const syntheticRow: Record<string, unknown> = {}
                 pivotData.rowHeaders.forEach((rh, i) => { syntheticRow[rh] = row.keys[i] })
@@ -6721,7 +7457,7 @@ function PivotCard({
                 if (config) {
                   const valCfgs = config.values
                   row.values.forEach((v, vi) => {
-                    const vcIdx = vi % valCfgs.length
+                    const vcIdx = row.valueIdx != null ? row.valueIdx : vi % valCfgs.length
                     const vc = valCfgs[vcIdx]
                     if (vc) {
                       syntheticRow[vc.column || vc.id] = v
@@ -6736,13 +7472,24 @@ function PivotCard({
                     const rh = pivotData.rowHeaders[ki]
                     const cellStyle = getCondStyle(condRules, syntheticRow, rh, 'cell')
                     const colFmt = widget.columnFormats?.[rh]
-                    const displayVal = colFmt ? applyColumnFormat(k, colFmt) : String(k ?? '—')
+                    const trunc = config?.columnTruncations?.[rh]
+                    let displayVal: string
+                    if (colFmt) {
+                      displayVal = applyColumnFormat(k, colFmt)
+                    } else if (trunc && trunc !== 'none') {
+                      // Keys are ISO strings when truncated — format them prettily
+                      const d = parseDate(k)
+                      displayVal = d ? formatDatePretty(d, trunc) : String(k ?? '—')
+                    } else {
+                      displayVal = String(k ?? '—')
+                    }
                     return (
                     <td key={ki} className="px-3 py-2 text-xs text-gray-800 border-b border-r border-gray-200 font-medium whitespace-nowrap overflow-hidden text-ellipsis bg-gray-100" style={cellStyle}>{displayVal}</td>
                     )
                   })}
                   {row.values.map((v, vi) => {
-                    const vcIdx = config ? vi % config.values.length : 0
+                    // When values are placed in rows, all values in a row are for the same metric
+                    const vcIdx = row.valueIdx != null ? row.valueIdx : (config ? vi % config.values.length : 0)
                     const vc = config?.values[vcIdx]
                     const colKey = vc ? (vc.column || vc.id) : String(vi)
                     const cellStyle = getCondStyle(condRules, syntheticRow, colKey, 'cell')
@@ -6759,6 +7506,7 @@ function PivotCard({
               })}
             </tbody>
           </table>
+          </div>
         )}
       </div>
 
@@ -6770,6 +7518,43 @@ function PivotCard({
           anchorRect={pivotFmtRect}
           onApply={handlePivotFmtApply}
           onClose={() => { setPivotFmtCol(null); setPivotFmtRect(null) }}
+        />
+      )}
+
+      {/* Pivot Header Context Menu */}
+      {pivotCtxMenu && (
+        <PivotHeaderContextMenu
+          x={pivotCtxMenu.x}
+          y={pivotCtxMenu.y}
+          columnKey={pivotCtxMenu.columnKey}
+          displayName={pivotCtxMenu.displayName}
+          currentTruncation={config?.columnTruncations?.[pivotCtxMenu.columnKey]}
+          isDateColumn={!!dateColumnCache[pivotCtxMenu.columnKey]}
+          sortState={pivotSortCol === pivotCtxMenu.colIdx ? pivotSortDir : null}
+          onSort={(dir) => {
+            if (dir === null) {
+              setPivotSortCol(null)
+              setPivotSortDir(null)
+            } else {
+              setPivotSortCol(pivotCtxMenu.colIdx)
+              setPivotSortDir(dir)
+            }
+          }}
+          onTruncation={handleTruncationChange}
+          onClose={() => setPivotCtxMenu(null)}
+        />
+      )}
+
+      {/* Column Filter Popover */}
+      {filterPopover && (
+        <ColumnFilterPopover
+          anchorRect={filterPopover.anchorRect}
+          columnKey={filterPopover.columnKey}
+          displayName={filterPopover.displayName}
+          allRows={rows}
+          currentFilter={config?.columnFilters?.[filterPopover.columnKey]}
+          onApply={handleFilterApply}
+          onClose={() => setFilterPopover(null)}
         />
       )}
     </div>
@@ -6784,22 +7569,69 @@ function usePivotData(
 ): {
   rowHeaders: string[]
   headers: string[]
+  colGroups: { label: string; span: number }[]  // column group spans for two-row header
+  valueLabels: string[]                          // per-value labels (repeated per group)
+  hasColGroups: boolean                          // true when colColumns are configured
   rows: { keys: unknown[]; values: (number | null)[] }[]
 } {
   return useMemo(() => {
-    if (!config || config.rowColumns.length === 0 || config.values.length === 0) {
-      return { rowHeaders: [], headers: [], rows: [] }
+    if (!config || !config.values || config.values.length === 0) {
+      return { rowHeaders: [], headers: [], colGroups: [], valueLabels: [], hasColGroups: false, rows: [] }
     }
 
-    const { rowColumns, colColumns, values } = config
+    const { rowColumns = [], colColumns = [], values, columnTruncations } = config
+    const noRowCols = rowColumns.length === 0
+
+    // Helper: apply date truncation to a field value
+    // Returns ISO-sortable string so grouping keys sort chronologically
+    const applyTrunc = (fieldName: string, raw: unknown): string => {
+      const trunc = columnTruncations?.[fieldName]
+      if (!trunc || trunc === 'none') return String(raw ?? '')
+      const d = parseDate(raw)
+      if (!d) return String(raw ?? '')
+      const td = truncateDate(d, trunc)
+      return td.toISOString()
+    }
+
+    // Helper: aggregate a value from a bucket
+    const aggregateValue = (bucket: { sums: number[]; counts: number[]; vals: number[][]; raws: unknown[][] }, vi: number, vc: PivotValueConfig): unknown => {
+      if (bucket.counts[vi] === 0) return null
+      switch (vc.aggregation) {
+        case 'none': return bucket.raws[vi][0] ?? null
+        case 'count': return bucket.counts[vi]
+        case 'sum': return bucket.sums[vi]
+        case 'average': return bucket.sums[vi] / bucket.counts[vi]
+        case 'min': return Math.min(...bucket.vals[vi])
+        case 'max': return Math.max(...bucket.vals[vi])
+        case 'count_distinct': return new Set(bucket.vals[vi].map(String)).size
+        default: return null
+      }
+    }
+
+    // Apply column filters — exclude rows that don't pass
+    const columnFilters = config.columnFilters
+    const filteredRows = columnFilters && Object.keys(columnFilters).length > 0
+      ? rows.filter((row) => {
+          for (const [col, filter] of Object.entries(columnFilters)) {
+            if (!filter) continue
+            const raw = row[col]
+            if (filter.excludeNulls && raw == null) return false
+            if (filter.excludeBlanks && raw != null && String(raw).trim() === '') return false
+            if (filter.excludeValues && filter.excludeValues.length > 0) {
+              if (raw != null && String(raw).trim() !== '' && filter.excludeValues.includes(String(raw))) return false
+            }
+          }
+          return true
+        })
+      : rows
 
     // Build a map: rowKey -> colKey -> valueIndex -> accumulated values
     const dataMap = new Map<string, Map<string, { sums: number[]; counts: number[]; vals: number[][]; raws: unknown[][] }>>()
     const colKeySet = new Set<string>()
 
-    for (const row of rows) {
-      const rowKey = rowColumns.map((rc) => String(row[rc] ?? '')).join('|||')
-      const colKey = colColumns.length > 0 ? colColumns.map((cc) => String(row[cc] ?? '')).join(' / ') : '__all__'
+    for (const row of filteredRows) {
+      const rowKey = noRowCols ? '__total__' : rowColumns.map((rc) => applyTrunc(rc, row[rc])).join('|||')
+      const colKey = colColumns.length > 0 ? colColumns.map((cc) => applyTrunc(cc, row[cc])).join(' / ') : '__all__'
       colKeySet.add(colKey)
 
       if (!dataMap.has(rowKey)) dataMap.set(rowKey, new Map())
@@ -6837,18 +7669,147 @@ function usePivotData(
 
     const colKeys = colColumns.length > 0 ? [...colKeySet].sort() : ['__all__']
 
-    // Build headers
+    // Helper: format a col key for display (pretty-print truncated dates)
+    const formatColKey = (ck: string): string => {
+      if (ck === '__all__') return ck
+      // Check if any colColumn has truncation — if so, the key may be ISO
+      for (const cc of colColumns) {
+        const trunc = columnTruncations?.[cc]
+        if (trunc && trunc !== 'none') {
+          const d = parseDate(ck)
+          if (d) return formatDatePretty(d, trunc)
+        }
+      }
+      return ck
+    }
+
+    // Build value labels
+    const valueLabels: string[] = values.map((vc) =>
+      vc.label || (vc.aggregation === 'none' ? (vc.column || '—') : `${AGGREGATION_LABELS[vc.aggregation]}${vc.column ? ` of ${vc.column}` : ''}`)
+    )
+
+    // ─── No row columns ───
+    if (noRowCols) {
+      const placement = config.valuesPlacement ?? 'columns'
+      const hasMultipleCols = colColumns.length > 0 && colKeys.length > 1
+      const colMap = dataMap.get('__total__')
+
+      if (placement === 'rows') {
+        // ── Values as ROWS: metric names in the first column, dates as flat headers ──
+        const rowHeaders = ['']
+        const headers: string[] = []
+        if (hasMultipleCols) {
+          for (const ck of colKeys) headers.push(formatColKey(ck))
+        } else {
+          headers.push('Value')
+        }
+
+        const resultRows: { keys: unknown[]; values: unknown[]; valueIdx?: number }[] = []
+        for (let vi = 0; vi < values.length; vi++) {
+          const rowValues: unknown[] = []
+          for (const ck of colKeys) {
+            const bucket = colMap?.get(ck)
+            rowValues.push(bucket ? aggregateValue(bucket, vi, values[vi]) : null)
+          }
+          resultRows.push({ keys: [valueLabels[vi]], values: rowValues, valueIdx: vi })
+        }
+
+        return { rowHeaders, headers, colGroups: [], valueLabels, hasColGroups: false, rows: resultRows }
+      }
+
+      // ── Values as COLUMNS (default): metric names as sub-headers under dates ──
+      const rowHeaders: string[] = []
+      const headers: string[] = []
+      const colGroups: { label: string; span: number }[] = []
+      const hasColGroups = hasMultipleCols && values.length > 1
+
+      if (hasMultipleCols) {
+        for (const ck of colKeys) {
+          const prettyKey = formatColKey(ck)
+          if (hasColGroups) colGroups.push({ label: prettyKey, span: values.length })
+          for (const vc of values) {
+            const label = vc.label || (vc.aggregation === 'none' ? (vc.column || '—') : `${AGGREGATION_LABELS[vc.aggregation]}${vc.column ? ` of ${vc.column}` : ''}`)
+            headers.push(hasColGroups ? `${prettyKey} — ${label}` : prettyKey)
+          }
+        }
+      } else {
+        for (const vc of values) {
+          headers.push(vc.label || (vc.aggregation === 'none' ? (vc.column || '—') : `${AGGREGATION_LABELS[vc.aggregation]}${vc.column ? ` of ${vc.column}` : ''}`))
+        }
+      }
+
+      // Single row with all values
+      const resultRows: { keys: unknown[]; values: unknown[]; valueIdx?: number }[] = []
+      const rowValues: unknown[] = []
+      for (const ck of colKeys) {
+        const bucket = colMap?.get(ck)
+        for (let vi = 0; vi < values.length; vi++) {
+          rowValues.push(bucket ? aggregateValue(bucket, vi, values[vi]) : null)
+        }
+      }
+      resultRows.push({ keys: [], values: rowValues })
+
+      return { rowHeaders, headers, colGroups, valueLabels, hasColGroups, rows: resultRows }
+    }
+
+    const placement = config.valuesPlacement ?? 'columns'
+
+    // ─── Values in ROWS: each value metric becomes a separate row ───
+    if (placement === 'rows') {
+      // Row headers = original row columns + a "Metric" column at the end
+      const rowHeaders = [...rowColumns, '']
+      // No two-row header for rows mode — column headers are just the group names
+      const hasColGroups = false
+      const colGroups: { label: string; span: number }[] = []
+
+      // One column header per colKey (no value multiplication)
+      const headers: string[] = []
+      for (const ck of colKeys) {
+        const prettyKey = formatColKey(ck)
+        headers.push(ck === '__all__' ? 'Value' : prettyKey)
+      }
+
+      // Build rows: for each original row key × each value → one result row
+      const resultRows: { keys: unknown[]; values: unknown[]; valueIdx?: number }[] = []
+      const sortedRowKeys = [...dataMap.keys()].sort()
+
+      for (const rowKey of sortedRowKeys) {
+        const baseKeys = rowKey.split('|||')
+        const colMap = dataMap.get(rowKey)!
+
+        for (let vi = 0; vi < values.length; vi++) {
+          const rowValues: unknown[] = []
+          for (const ck of colKeys) {
+            const bucket = colMap.get(ck)
+            rowValues.push(bucket ? aggregateValue(bucket, vi, values[vi]) : null)
+          }
+          // Append the metric label as the last key; track value index
+          resultRows.push({ keys: [...baseKeys, valueLabels[vi]], values: rowValues, valueIdx: vi })
+        }
+      }
+
+      return { rowHeaders, headers, colGroups, valueLabels, hasColGroups, rows: resultRows }
+    }
+
+    // ─── Values in COLUMNS (default): each value gets its own column ───
     const rowHeaders = rowColumns.map((rc) => rc)
     const headers: string[] = []
+    // Only show two-row header (col group + value sub-labels) when >1 value
+    const hasColGroups = colColumns.length > 0 && colKeys.length > 1 && values.length > 1
+    const colGroups: { label: string; span: number }[] = []
     for (const ck of colKeys) {
+      const prettyKey = formatColKey(ck)
+      if (hasColGroups) {
+        colGroups.push({ label: prettyKey, span: values.length })
+      }
       for (const vc of values) {
         const label = vc.label || (vc.aggregation === 'none' ? (vc.column || '—') : `${AGGREGATION_LABELS[vc.aggregation]}${vc.column ? ` of ${vc.column}` : ''}`)
-        headers.push(colKeys.length > 1 && ck !== '__all__' ? `${ck} — ${label}` : label)
+        headers.push(hasColGroups ? `${prettyKey} — ${label}` : label)
       }
     }
 
     // Build rows
-    const resultRows: { keys: unknown[]; values: unknown[] }[] = []
+    const resultRows: { keys: unknown[]; values: unknown[]; valueIdx?: number }[] = []
     const sortedRowKeys = [...dataMap.keys()].sort()
 
     for (const rowKey of sortedRowKeys) {
@@ -6859,44 +7820,14 @@ function usePivotData(
       for (const ck of colKeys) {
         const bucket = colMap.get(ck)
         for (let vi = 0; vi < values.length; vi++) {
-          if (!bucket || bucket.counts[vi] === 0) {
-            rowValues.push(null)
-            continue
-          }
-          const vc = values[vi]
-          switch (vc.aggregation) {
-            case 'none':
-              // Raw value — take the first value in the bucket
-              rowValues.push(bucket.raws[vi][0] ?? null)
-              break
-            case 'count':
-              rowValues.push(bucket.counts[vi])
-              break
-            case 'sum':
-              rowValues.push(bucket.sums[vi])
-              break
-            case 'average':
-              rowValues.push(bucket.sums[vi] / bucket.counts[vi])
-              break
-            case 'min':
-              rowValues.push(Math.min(...bucket.vals[vi]))
-              break
-            case 'max':
-              rowValues.push(Math.max(...bucket.vals[vi]))
-              break
-            case 'count_distinct':
-              rowValues.push(new Set(bucket.vals[vi].map(String)).size)
-              break
-            default:
-              rowValues.push(null)
-          }
+          rowValues.push(bucket ? aggregateValue(bucket, vi, values[vi]) : null)
         }
       }
 
       resultRows.push({ keys, values: rowValues })
     }
 
-    return { rowHeaders, headers, rows: resultRows }
+    return { rowHeaders, headers, colGroups, valueLabels, hasColGroups, rows: resultRows }
   }, [rows, config])
 }
 

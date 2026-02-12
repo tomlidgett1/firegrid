@@ -14,13 +14,42 @@ import CollectionExplorerPage from '@/pages/CollectionExplorerPage'
 import LightspeedCallbackPage from '@/pages/LightspeedCallbackPage'
 import SalesPage from '@/pages/SalesPage'
 import { Loader2, RefreshCw } from 'lucide-react'
-import { useState, useEffect, type ReactNode } from 'react'
+import { useState, useEffect, useRef, type ReactNode } from 'react'
 
 function ProtectedRoute({ children }: { children: ReactNode }) {
-  const { user, loading, signIn } = useAuth()
+  const { user, loading, signIn, refreshAccessToken } = useAuth()
   const [reauthing, setReauthing] = useState(false)
+  const [autoRefreshFailed, setAutoRefreshFailed] = useState(false)
+  const autoRefreshAttempted = useRef(false)
 
-  if (loading) {
+  // When user exists but token is missing/expired, auto-attempt a silent refresh.
+  // This often succeeds without user interaction if they're already signed in to Google.
+  useEffect(() => {
+    if (loading || !user || user.accessToken || autoRefreshAttempted.current) return
+
+    autoRefreshAttempted.current = true
+    setReauthing(true)
+
+    refreshAccessToken()
+      .then((token) => {
+        if (!token) setAutoRefreshFailed(true)
+        setReauthing(false)
+      })
+      .catch(() => {
+        setAutoRefreshFailed(true)
+        setReauthing(false)
+      })
+  }, [loading, user, refreshAccessToken])
+
+  // Reset auto-refresh tracking when token becomes available
+  useEffect(() => {
+    if (user?.accessToken) {
+      autoRefreshAttempted.current = false
+      setAutoRefreshFailed(false)
+    }
+  }, [user?.accessToken])
+
+  if (loading || reauthing) {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
         <Loader2 size={20} className="animate-spin text-gray-400" />
@@ -32,7 +61,7 @@ function ProtectedRoute({ children }: { children: ReactNode }) {
     return <Navigate to="/login" replace />
   }
 
-  // User is logged in but OAuth token is missing (e.g. sessionStorage cleared)
+  // User is logged in but OAuth token is missing and auto-refresh failed
   if (!user.accessToken) {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center p-6">
@@ -42,11 +71,13 @@ function ProtectedRoute({ children }: { children: ReactNode }) {
             Session expired
           </h3>
           <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">
-            Your Google access token has expired. Please sign in again to reconnect.
+            Your Google access token has expired. Click below to reconnect — it only takes a moment.
           </p>
           <button
             onClick={async () => {
               setReauthing(true)
+              setAutoRefreshFailed(false)
+              autoRefreshAttempted.current = false
               try {
                 await signIn()
               } catch {

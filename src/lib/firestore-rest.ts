@@ -10,12 +10,87 @@ import { parseFirestoreValue, toFirestoreFields } from './utils'
 const FIRESTORE_BASE = 'https://firestore.googleapis.com/v1'
 const RESOURCE_MANAGER_BASE = 'https://cloudresourcemanager.googleapis.com/v1'
 
+// ---- Token expiry event ----
+
+/**
+ * Custom event dispatched when a 401 is received from Google APIs,
+ * indicating the OAuth access token has expired. The AuthContext listens
+ * for this and clears the stale token so the UI can prompt re-auth.
+ */
+export const TOKEN_EXPIRED_EVENT = 'firegrid:token-expired'
+
+function emitTokenExpired() {
+  window.dispatchEvent(new CustomEvent(TOKEN_EXPIRED_EVENT))
+}
+
+// ---- Auth-aware fetch helpers ----
+
+/**
+ * Thin wrapper around fetch that detects 401 (expired token) and emits a
+ * custom event so the auth layer can prompt re-authentication.
+ */
+async function authFetch(
+  input: RequestInfo | URL,
+  init?: RequestInit
+): Promise<Response> {
+  const res = await fetch(input, init)
+  if (res.status === 401) {
+    emitTokenExpired()
+  }
+  return res
+}
+
+/**
+ * Wraps authFetch with retry + exponential backoff for 429 / 503 quota errors.
+ * Also detects 401 (expired token) via authFetch.
+ * New GCP projects have low initial rate limits that scale up over time,
+ * so we need to be gentle with request bursts.
+ */
+async function fetchWithRetry(
+  input: RequestInfo | URL,
+  init?: RequestInit,
+  maxRetries = 3
+): Promise<Response> {
+  let lastError: Error | null = null
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const res = await authFetch(input, init)
+
+    // 401 = expired token — no point retrying with the same token
+    if (res.status === 401) return res
+
+    if (res.ok || (res.status !== 429 && res.status !== 503)) return res
+    // Rate-limited — back off and retry
+    lastError = new Error(`Rate limited (${res.status})`)
+    const delay = Math.min(1000 * Math.pow(2, attempt), 8000) + Math.random() * 500
+    await new Promise((r) => setTimeout(r, delay))
+  }
+  throw lastError ?? new Error('fetchWithRetry: exhausted retries')
+}
+
+/**
+ * Process items in sequential batches of `size`, running each batch in parallel.
+ * Prevents request bursts that trigger per-minute API quotas on new projects.
+ */
+async function batchedParallel<T, R>(
+  items: T[],
+  fn: (item: T) => Promise<R>,
+  size = 5
+): Promise<R[]> {
+  const results: R[] = []
+  for (let i = 0; i < items.length; i += size) {
+    const batch = items.slice(i, i + size)
+    const batchResults = await Promise.all(batch.map(fn))
+    results.push(...batchResults)
+  }
+  return results
+}
+
 // ---- GCP Projects ----
 
 export async function listGCPProjects(
   accessToken: string
 ): Promise<GCPProject[]> {
-  const res = await fetch(`${RESOURCE_MANAGER_BASE}/projects?filter=lifecycleState:ACTIVE`, {
+  const res = await authFetch(`${RESOURCE_MANAGER_BASE}/projects?filter=lifecycleState:ACTIVE`, {
     headers: { Authorization: `Bearer ${accessToken}` },
   })
 
@@ -44,7 +119,7 @@ export async function listCollections(
   const dbPath = `projects/${projectId}/databases/(default)/documents`
   const docPath = parentPath ? `${dbPath}/${parentPath}` : dbPath
 
-  const res = await fetch(`${FIRESTORE_BASE}/${docPath}:listCollectionIds`, {
+  const res = await fetchWithRetry(`${FIRESTORE_BASE}/${docPath}:listCollectionIds`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${accessToken}`,
@@ -61,12 +136,15 @@ export async function listCollections(
   const data = await res.json()
   const collectionIds: string[] = data.collectionIds ?? []
 
-  const collections: CollectionInfo[] = await Promise.all(
-    collectionIds.map(async (id) => {
+  // Probe collections in small batches (5 at a time) to avoid bursting
+  // API rate limits — new GCP projects have low initial quotas.
+  const collections = await batchedParallel(
+    collectionIds,
+    async (id): Promise<CollectionInfo> => {
       const collPath = parentPath ? `${parentPath}/${id}` : id
       try {
         // First check for real documents
-        const countRes = await fetch(`${FIRESTORE_BASE}/${dbPath}/${collPath}?pageSize=1`, {
+        const countRes = await fetchWithRetry(`${FIRESTORE_BASE}/${dbPath}/${collPath}?pageSize=1`, {
           headers: { Authorization: `Bearer ${accessToken}` },
         })
         const countData = await countRes.json()
@@ -78,7 +156,7 @@ export async function listCollections(
 
         // No real docs — check for phantom/missing docs (documents that exist
         // only as path containers for subcollections)
-        const missingRes = await fetch(
+        const missingRes = await fetchWithRetry(
           `${FIRESTORE_BASE}/${dbPath}/${collPath}?pageSize=1&showMissing=true`,
           { headers: { Authorization: `Bearer ${accessToken}` } }
         )
@@ -94,7 +172,8 @@ export async function listCollections(
       } catch {
         return { id, path: collPath, documentCount: null }
       }
-    })
+    },
+    5 // batch size — keeps concurrent requests low for new projects
   )
 
   return collections
@@ -122,7 +201,7 @@ async function listAllDocumentIds(
     if (showMissing) url.searchParams.set('showMissing', 'true')
     if (pageToken) url.searchParams.set('pageToken', pageToken)
 
-    const res = await fetch(url.toString(), {
+    const res = await fetchWithRetry(url.toString(), {
       headers: { Authorization: `Bearer ${accessToken}` },
     })
 
@@ -163,15 +242,16 @@ export async function discoverSubCollections(
     if (allDocIds.length === 0) return []
   }
 
-  // 3. Check every document for sub-collections in concurrent batches
-  const BATCH_SIZE = 50
+  // 3. Check every document for sub-collections in concurrent batches.
+  //    Use small batches (10) to avoid bursting API quotas on new projects.
+  const BATCH_SIZE = 10
   for (let i = 0; i < allDocIds.length; i += BATCH_SIZE) {
     const batch = allDocIds.slice(i, i + BATCH_SIZE)
 
     await Promise.all(
       batch.map(async (docId) => {
         try {
-          const res = await fetch(
+          const res = await fetchWithRetry(
             `${FIRESTORE_BASE}/${dbPath}/${collectionPath}/${docId}:listCollectionIds`,
             {
               method: 'POST',
@@ -245,7 +325,7 @@ export async function fetchDocuments(
     url.searchParams.set('pageToken', pageToken)
   }
 
-  const res = await fetch(url.toString(), {
+  const res = await authFetch(url.toString(), {
     headers: { Authorization: `Bearer ${accessToken}` },
   })
 
@@ -311,7 +391,7 @@ export async function fetchCollectionGroup(
     }
   }
 
-  const res = await fetch(`${FIRESTORE_BASE}/${dbPath}:runQuery`, {
+  const res = await authFetch(`${FIRESTORE_BASE}/${dbPath}:runQuery`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${accessToken}`,
@@ -354,6 +434,228 @@ export async function fetchCollectionGroup(
   }
 }
 
+// ---- Ordered Query (server-side sorting via runQuery) ----
+
+export interface OrderedQueryCursor {
+  /** Raw Firestore value of the sort field from the last document */
+  sortFieldRawValue: FirestoreValue
+  /** Full document reference (projects/…/documents/…) for __name__ tiebreaker */
+  documentRef: string
+}
+
+/**
+ * Fetches documents with server-side ordering using Firestore's runQuery.
+ * Works for both regular collections and collection groups.
+ *
+ * This lets Firestore sort millions of documents via its indexes —
+ * only the requested page is transferred over the network.
+ */
+export async function queryDocumentsOrdered(
+  accessToken: string,
+  projectId: string,
+  collectionPath: string,
+  options: {
+    pageSize?: number
+    orderByField: string  // Firestore field path (dot notation), or '__id' for document ID
+    orderDirection: 'ASCENDING' | 'DESCENDING'
+    isCollectionGroup?: boolean
+    cursor?: OrderedQueryCursor
+  }
+): Promise<{
+  documents: DocumentData[]
+  nextCursor?: OrderedQueryCursor
+}> {
+  const dbPath = `projects/${projectId}/databases/(default)/documents`
+  const pageSize = options.pageSize ?? 100
+
+  // Map __id (our internal meta field) to Firestore's __name__ pseudo-field
+  const firestoreFieldPath =
+    options.orderByField === '__id' ? '__name__' : options.orderByField
+
+  // Split collectionPath into parent + collectionId for the runQuery endpoint.
+  // "users" → parent: "", collectionId: "users"
+  // "users/abc/orders" → parent: "users/abc", collectionId: "orders"
+  let parentPath = ''
+  let collectionId = collectionPath
+  if (!options.isCollectionGroup) {
+    const lastSlash = collectionPath.lastIndexOf('/')
+    if (lastSlash !== -1) {
+      parentPath = collectionPath.substring(0, lastSlash)
+      collectionId = collectionPath.substring(lastSlash + 1)
+    }
+  }
+
+  // Build orderBy — primary field + __name__ tiebreaker
+  const orderByClause: Array<{ field: { fieldPath: string }; direction: string }> = []
+  if (firestoreFieldPath !== '__name__') {
+    orderByClause.push({
+      field: { fieldPath: firestoreFieldPath },
+      direction: options.orderDirection,
+    })
+  }
+  // __name__ tiebreaker (same direction as primary) ensures deterministic pagination
+  orderByClause.push({
+    field: { fieldPath: '__name__' },
+    direction: options.orderDirection,
+  })
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const structuredQuery: Record<string, any> = {
+    from: [
+      {
+        collectionId,
+        ...(options.isCollectionGroup ? { allDescendants: true } : {}),
+      },
+    ],
+    orderBy: orderByClause,
+    limit: pageSize,
+  }
+
+  // Cursor-based pagination — start AFTER the last document from previous page
+  if (options.cursor) {
+    const cursorValues: FirestoreValue[] = []
+    if (firestoreFieldPath !== '__name__') {
+      cursorValues.push(options.cursor.sortFieldRawValue)
+    }
+    cursorValues.push({ referenceValue: options.cursor.documentRef })
+
+    structuredQuery.startAt = {
+      values: cursorValues,
+      before: false, // false = start AFTER (exclusive), like startAfter in the SDK
+    }
+  }
+
+  const queryPath = parentPath ? `${dbPath}/${parentPath}` : dbPath
+
+  const res = await authFetch(`${FIRESTORE_BASE}/${queryPath}:runQuery`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ structuredQuery }),
+  })
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error?.message || `Sorted query failed: ${res.status}`)
+  }
+
+  const results: Array<{ document?: FirestoreDocument; readTime?: string }> =
+    await res.json()
+
+  const documents: DocumentData[] = []
+  let lastRawDoc: FirestoreDocument | undefined
+
+  for (const result of results) {
+    if (!result.document) continue
+    const doc = result.document
+    const relPath = extractRelativePath(doc.name, projectId)
+    const parsed: DocumentData = {
+      __id: extractDocId(doc.name),
+      __path: relPath,
+    }
+    if (options.isCollectionGroup) {
+      parsed.__parentId = extractParentDocId(doc.name)
+    }
+    if (doc.fields) {
+      for (const [key, value] of Object.entries(doc.fields)) {
+        parsed[key] = parseFirestoreValue(value as FirestoreValue)
+      }
+    }
+    documents.push(parsed)
+    lastRawDoc = doc
+  }
+
+  // Build cursor for the next page from the last document
+  let nextCursor: OrderedQueryCursor | undefined
+  if (lastRawDoc && documents.length >= pageSize) {
+    const sortFieldRawValue: FirestoreValue =
+      firestoreFieldPath === '__name__'
+        ? { referenceValue: lastRawDoc.name }
+        : extractRawFieldValue(lastRawDoc.fields ?? {}, firestoreFieldPath) ??
+          { nullValue: null }
+
+    nextCursor = {
+      sortFieldRawValue,
+      documentRef: lastRawDoc.name,
+    }
+  }
+
+  return { documents, nextCursor }
+}
+
+/**
+ * Extracts a raw (unparsed) Firestore value by dot-separated field path
+ * from a document's fields. Used to build cursors for pagination.
+ */
+function extractRawFieldValue(
+  fields: Record<string, FirestoreValue>,
+  fieldPath: string
+): FirestoreValue | undefined {
+  const parts = fieldPath.split('.')
+  let current: Record<string, FirestoreValue> = fields
+
+  for (let i = 0; i < parts.length - 1; i++) {
+    const val = current[parts[i]]
+    if (!val?.mapValue?.fields) return undefined
+    current = val.mapValue.fields
+  }
+
+  return current[parts[parts.length - 1]]
+}
+
+// ---- Fetch ALL Documents (paginate through entire collection) ----
+
+/**
+ * Fetches every document in a collection or collection group by
+ * automatically paging through all results (300 per batch).
+ *
+ * An optional `onProgress` callback fires after each batch so callers
+ * can show a live count to the user.
+ */
+export async function fetchAllDocuments(
+  accessToken: string,
+  projectId: string,
+  collectionPath: string,
+  options?: {
+    isCollectionGroup?: boolean
+    onProgress?: (loaded: number) => void
+    /** If provided, checked before each batch. Return true to abort early. */
+    isCancelled?: () => boolean
+  }
+): Promise<DocumentData[]> {
+  const BATCH_SIZE = 300
+  const allDocuments: DocumentData[] = []
+  const isGroup = options?.isCollectionGroup ?? false
+
+  if (isGroup) {
+    let cursor: string | undefined
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      if (options?.isCancelled?.()) return allDocuments
+      const result = await fetchCollectionGroup(accessToken, projectId, collectionPath, BATCH_SIZE, cursor)
+      allDocuments.push(...result.documents)
+      options?.onProgress?.(allDocuments.length)
+      cursor = result.lastDocumentPath
+      if (!cursor || result.documents.length < BATCH_SIZE) break
+    }
+  } else {
+    let token: string | undefined
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      if (options?.isCancelled?.()) return allDocuments
+      const result = await fetchDocuments(accessToken, projectId, collectionPath, BATCH_SIZE, token)
+      allDocuments.push(...result.documents)
+      options?.onProgress?.(allDocuments.length)
+      token = result.nextPageToken
+      if (!token || result.documents.length < BATCH_SIZE) break
+    }
+  }
+
+  return allDocuments
+}
+
 // ---- Sample Documents ----
 
 export async function sampleDocuments(
@@ -386,7 +688,7 @@ export async function fetchSingleDocument(
 ): Promise<DocumentData> {
   const dbPath = `projects/${projectId}/databases/(default)/documents`
 
-  const res = await fetch(`${FIRESTORE_BASE}/${dbPath}/${documentPath}`, {
+  const res = await authFetch(`${FIRESTORE_BASE}/${dbPath}/${documentPath}`, {
     headers: { Authorization: `Bearer ${accessToken}` },
   })
 
@@ -423,7 +725,7 @@ export async function updateDocument(
     params.append('updateMask.fieldPaths', fp)
   }
 
-  const res = await fetch(
+  const res = await authFetch(
     `${FIRESTORE_BASE}/${dbPath}/${documentPath}?${params.toString()}`,
     {
       method: 'PATCH',
@@ -449,7 +751,7 @@ export async function deleteDocument(
 ): Promise<void> {
   const dbPath = `projects/${projectId}/databases/(default)/documents`
 
-  const res = await fetch(`${FIRESTORE_BASE}/${dbPath}/${documentPath}`, {
+  const res = await authFetch(`${FIRESTORE_BASE}/${dbPath}/${documentPath}`, {
     method: 'DELETE',
     headers: { Authorization: `Bearer ${accessToken}` },
   })
@@ -476,7 +778,7 @@ export async function createDocument(
     url.searchParams.set('documentId', documentId)
   }
 
-  const res = await fetch(url.toString(), {
+  const res = await authFetch(url.toString(), {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${accessToken}`,

@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
 import type { SavedTable } from '@/lib/types'
-import { collection, query, getDocs, doc, orderBy, updateDoc, addDoc, getDoc, setDoc, Timestamp, serverTimestamp } from 'firebase/firestore'
+import { collection, query, getDocs, doc, orderBy, updateDoc, addDoc, getDoc, setDoc, Timestamp, serverTimestamp, limit } from 'firebase/firestore'
 import { db } from '@/lib/firebase'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
