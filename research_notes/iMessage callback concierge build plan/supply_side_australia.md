@@ -20,7 +20,6 @@ No source hands you a clean, licensed list of verified tradie mobile numbers you
 **Google Places API (New): pricing (since 1 March 2025)**
 - On 1 March 2025 Google replaced the $200 monthly credit with free monthly caps per SKU: 10,000 calls for Essentials, 5,000 for Pro and 1,000 for Enterprise. Caps reset monthly. — [Google Maps Platform pricing](https://developers.google.com/maps/billing-and-pricing/pricing?hl=en_US)
 - Example prices (USD per 1,000, first tier): Place Details Essentials $5.00 (10k free); Text Search Pro and Nearby Search Pro $32.00 (5k free); Place Details Enterprise $20.00; Text Search Enterprise $35.00. Text Search Essentials (IDs only) is unlimited. Requesting ratings moves a call to the Enterprise tier, and requesting reviews moves it to Enterprise + Atmosphere. — [Google pricing (cn mirror)](https://developers.google.cn/maps/billing-and-pricing/pricing?hl=en); [openplacesapi.com](https://openplacesapi.com/blog/google-places-api-pricing). Sources list slightly different figures for some SKUs, so confirm on Google's live pricing page.
-- Note on SKUs: the phone number field (`nationalPhoneNumber`/`internationalPhoneNumber`) sits in the Enterprise field mask under Places (New) per Google's field-tiering. This was not directly confirmed in this session, so see Gaps.
 
 **ABN Lookup (Australian Business Register)**
 - Access to the ABN Lookup web services is free of charge. You register, accept the web services agreement, and receive an authentication GUID by email. — [ABR web services](https://abr.business.gov.au/Tools/WebServices); [ABR registration guide](https://abr.business.gov.au/Documentation/UserGuideWebRegistration.aspx)
@@ -64,6 +63,7 @@ No source hands you a clean, licensed list of verified tradie mobile numbers you
   - ACMA's SMS Sender ID Register (legislated 2024) may now require alphanumeric sender IDs to be registered. Check status before sending branded SMS.
   - The Privacy Act small-business exemption (<$3m turnover) likely covers a solo founder today, but consumer phone numbers and job details should be handled as if the APPs apply, given pending reform tranches.
   - Google Maps Platform general terms prohibit using Maps content to create or augment a business-listing database. Storing scraped phone numbers in a CRM is the main compliance risk.
+  - In Places API (New), the phone number fields (`nationalPhoneNumber`/`internationalPhoneNumber`) and `websiteUri` are believed to fall in the Place Details **Enterprise** SKU (~US$20 per 1,000), not Essentials. Check the field-to-SKU table in the current docs.
 
 ---
 
