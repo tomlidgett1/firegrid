@@ -296,15 +296,15 @@ Quote shopping has the money (credit, health) and naturally low leakage. However
 | 5 | Energy plan switch callback | Quote | 3 | 8 | 4 | 4 | 6 | 6 | **31** | M |
 | 6 | Solar/battery quotes | Quote | 1 | 8 | 5 | 3 | 7 | 7 | **31** | H (lead prices) |
 | 7 | Phone/NBN plan callback | Quote | 3 | 7 | 2 | 3 | 8 | 7 | **30** | L |
-| 8 | Car purchase/finance broker callback | Quote | 1 | 7 | 6 | 5 | 5 | 5 | **29** | L |
-| 9 | Multi-domain expert line (JustAnswer-style breadth) | Expert | 5 | 6 | 5 | 6 | 5 | 3 | **30** | M |
-| 10 | Mortgage refinance/pre-approval broker callback (standalone) | Quote | 2 | 4 | 10 | 3 | 3 | 7 | **29** | H |
-| 11 | Car/home insurance renewal quotes (standalone) | Quote | 4 | 8 | 5 | 4 | 3 | 4 | **28** | M |
-| 12 | One-off legal question callback | Expert | 3 | 5 | 6 | 5 | 5 | 5 | **29** | M |
+| 8 | Multi-domain expert line (JustAnswer-style breadth) | Expert | 5 | 6 | 5 | 6 | 5 | 3 | **30** | M |
+| 9 | Mortgage refinance/pre-approval broker callback (standalone) | Quote | 2 | 4 | 10 | 3 | 3 | 7 | **29** | H |
+| 10 | One-off legal question callback | Expert | 3 | 5 | 6 | 5 | 5 | 5 | **29** | M |
+| 11 | Car purchase/finance broker callback | Quote | 1 | 7 | 6 | 5 | 5 | 5 | **29** | L |
+| 12 | Car/home insurance renewal quotes (standalone) | Quote | 4 | 8 | 5 | 4 | 3 | 4 | **28** | M |
 | 13 | Mechanic/vet advice callback | Expert | 4 | 3 | 3 | 5 | 8 | 5 | **28** | L |
 | 14 | Accountant/tax question callback | Expert | 3 | 2 | 5 | 4 | 5 | 5 | **24** | L |
 
-(Ties are ordered by strategic fit. Multi-domain expert at 30 is placed below the quote verticals because its feasibility score of 3 is a near-blocker for a solo founder. Standalone mortgage at 29 is placed above lower-scoring rows because its 10 for lead value means very few leads are needed to make money.)
+(Rows are ordered by unweighted total, with ties broken by strategic fit. Health is placed first among the 31s because of its lead value. Multi-domain expert is placed last among the 30s because its feasibility score of 3 is a near-blocker for a solo founder. Standalone mortgage leads the 29s because its 10 for lead value means very few leads are needed to make money. Its main use is as the monetisation leg of candidates 2 and 3, not as a standalone product.)
 
 **Interpretation for the founder**
 - **Frequency winners are not the money winners.** Tech help for seniors and renewal prompting create monthly touchpoints. Mortgage and health create the revenue. The strongest combined design is probably a **household "call me" line** with (a) a family-paid tech-help subscription as the frequency engine, and (b) proactive renewal prompts plus house-hunt support as the monetisation, routed to one licensed partner per financial vertical. On the money side, the founder acts as a credit representative or authorised representative, or an introducer under the partner's licence, not as a lead seller.
